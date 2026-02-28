@@ -320,7 +320,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
         let picker = ratatui_image::picker::Picker::halfblocks();
-        let mut app = App::new(entries, vec![], PathBuf::from("/test"), thumb_cache, picker);
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
         app.triage = Some(TriageState::new(count));
         app
     }

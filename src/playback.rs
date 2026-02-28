@@ -124,7 +124,6 @@ impl MpvController {
     ///
     /// # Errors
     /// Returns an error if the IPC query fails.
-    #[expect(dead_code, reason = "will be used for playback progress display")]
     pub async fn get_position(&mut self) -> Result<f64> {
         let resp = self
             .send_command_with_response(r#"{"command": ["get_property", "time-pos"]}"#)
@@ -135,6 +134,22 @@ impl MpvController {
         val.get("data")
             .and_then(serde_json::Value::as_f64)
             .context("no time-pos in response")
+    }
+
+    /// Get total duration of the current file in seconds.
+    ///
+    /// # Errors
+    /// Returns an error if the IPC query fails.
+    pub async fn get_duration(&mut self) -> Result<f64> {
+        let resp = self
+            .send_command_with_response(r#"{"command": ["get_property", "duration"]}"#)
+            .await?;
+
+        let val: serde_json::Value =
+            serde_json::from_str(&resp).context("failed to parse mpv response")?;
+        val.get("data")
+            .and_then(serde_json::Value::as_f64)
+            .context("no duration in response")
     }
 
     /// Stop playback and kill mpv process.

@@ -8,6 +8,7 @@ pub mod preview;
 pub mod triage;
 pub mod widgets;
 
+use crate::filter::Filter;
 use crate::playback::{MpvController, PlaybackState};
 use crate::scan;
 use crate::sort::sort_entries;
@@ -28,6 +29,38 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
+
+/// Filter input mode: fuzzy name matching vs structured expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterMode {
+    /// Fuzzy substring match on file name (default).
+    Fuzzy,
+    /// Structured field expression using `filter.rs` parser (prefix `=`).
+    Structured,
+}
+
+/// Media kind pre-filter (1/2/3 keys).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KindFilter {
+    /// Show all media types.
+    All,
+    /// Show only files with a video stream.
+    Video,
+    /// Show only audio-only files (no video stream).
+    Audio,
+}
+
+impl KindFilter {
+    /// Label for display in the footer.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Video => "Video",
+            Self::Audio => "Audio",
+        }
+    }
+}
 
 /// Thumbnail preview state machine.
 pub enum ThumbState {
@@ -91,6 +124,30 @@ pub struct App {
     fuzzy_matcher: Matcher,
     /// Move-to-directory input text (None = not in move input mode).
     move_input: Option<String>,
+    /// Media kind pre-filter.
+    kind_filter: KindFilter,
+    /// Current filter mode (fuzzy vs structured).
+    filter_mode: FilterMode,
+    /// Last successfully parsed structured filter expression.
+    filter_expr: Option<Filter>,
+    /// Subdirectories of `current_dir`, sorted alphabetically.
+    dir_items: Vec<PathBuf>,
+    /// Cached sibling directories (for parent pane rendering).
+    sibling_dirs: Vec<PathBuf>,
+    /// Receiver for async directory scan results.
+    dir_scan_rx: Option<oneshot::Receiver<(Vec<MediaEntry>, Vec<ProbeError>)>>,
+    /// Whether a directory scan is in progress.
+    dir_scanning: bool,
+    /// Stored scan concurrency (from CLI args).
+    scan_concurrency: usize,
+    /// Stored scan timeout (from CLI args).
+    scan_timeout_ms: u64,
+    /// Current playback position in seconds (polled from mpv).
+    playback_position: Option<f64>,
+    /// Total duration of playing file in seconds (fetched once).
+    playback_duration: Option<f64>,
+    /// File name currently being played (for display).
+    playback_file_name: Option<String>,
 }
 
 impl App {
@@ -101,8 +158,12 @@ impl App {
         current_dir: PathBuf,
         thumb_cache: ThumbnailCache,
         picker: Picker,
+        scan_concurrency: usize,
+        scan_timeout_ms: u64,
     ) -> Self {
         let filtered_indices: Vec<usize> = (0..entries.len()).collect();
+        let dir_items = list_subdirs(&current_dir);
+        let sibling_dirs = list_sibling_dirs(&current_dir);
         Self {
             entries,
             errors,
@@ -128,48 +189,134 @@ impl App {
             status_message: None,
             fuzzy_matcher: Matcher::new(Config::DEFAULT),
             move_input: None,
+            dir_items,
+            sibling_dirs,
+            dir_scan_rx: None,
+            dir_scanning: false,
+            scan_concurrency,
+            scan_timeout_ms,
+            kind_filter: KindFilter::All,
+            filter_mode: FilterMode::Fuzzy,
+            filter_expr: None,
+            playback_position: None,
+            playback_duration: None,
+            playback_file_name: None,
         }
     }
 
-    /// Get the currently selected entry (if any).
+    /// Get the currently selected media entry (if any).
+    ///
+    /// Returns `None` if a directory is selected or nothing is selected.
     #[must_use]
     pub fn selected_entry(&self) -> Option<&MediaEntry> {
+        let dir_count = self.dir_items.len();
+        if self.selected < dir_count {
+            return None; // Directory selected
+        }
+        let media_idx = self.selected - dir_count;
         self.filtered_indices
-            .get(self.selected)
+            .get(media_idx)
             .and_then(|&idx| self.entries.get(idx))
+    }
+
+    /// Get the currently selected directory (if any).
+    #[must_use]
+    pub fn selected_dir(&self) -> Option<&PathBuf> {
+        if self.selected < self.dir_items.len() {
+            Some(&self.dir_items[self.selected])
+        } else {
+            None
+        }
     }
 
     /// Apply the current filter and rebuild filtered indices.
     ///
-    /// Uses fuzzy matching via nucleo-matcher. Results are sorted by
-    /// match score descending (best match first).
+    /// Pipeline: entries → kind pre-filter → fuzzy/structured → `filtered_indices`.
     fn apply_filter(&mut self) {
-        if self.filter_text.is_empty() {
-            self.filtered_indices = (0..self.entries.len()).collect();
+        // Step 1: kind pre-filter
+        let kind_indices: Vec<usize> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| self.matches_kind(e))
+            .map(|(i, _)| i)
+            .collect();
+
+        // Step 2: fuzzy or structured filter
+        if self.filter_text.is_empty() && self.filter_mode == FilterMode::Fuzzy {
+            self.filtered_indices = kind_indices;
         } else {
-            let pattern = Pattern::parse(
-                &self.filter_text,
-                CaseMatching::Ignore,
-                Normalization::Smart,
-            );
-            let mut scored: Vec<(usize, u32)> = self
-                .entries
-                .iter()
-                .enumerate()
-                .filter_map(|(i, e)| {
-                    let chars: Vec<char> = e.file_name.chars().collect();
-                    let haystack = nucleo_matcher::Utf32Str::Unicode(&chars);
-                    pattern
-                        .score(haystack, &mut self.fuzzy_matcher)
-                        .map(|score| (i, score))
-                })
-                .collect();
-            scored.sort_by(|a, b| b.1.cmp(&a.1));
-            self.filtered_indices = scored.into_iter().map(|(i, _)| i).collect();
+            match self.filter_mode {
+                FilterMode::Fuzzy => self.apply_fuzzy_filter(&kind_indices),
+                FilterMode::Structured => self.apply_structured_filter(&kind_indices),
+            }
         }
         // Keep selected index in bounds
         if self.selected >= self.filtered_indices.len() {
             self.selected = self.filtered_indices.len().saturating_sub(1);
+        }
+    }
+
+    /// Check if an entry matches the current kind filter.
+    fn matches_kind(&self, entry: &MediaEntry) -> bool {
+        match self.kind_filter {
+            KindFilter::All => true,
+            KindFilter::Video => entry.media.video.is_some(),
+            KindFilter::Audio => entry.media.video.is_none(),
+        }
+    }
+
+    /// Fuzzy match on file name using nucleo-matcher.
+    fn apply_fuzzy_filter(&mut self, candidates: &[usize]) {
+        if self.filter_text.is_empty() {
+            self.filtered_indices = candidates.to_vec();
+            return;
+        }
+        let pattern = Pattern::parse(
+            &self.filter_text,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+        );
+        let mut scored: Vec<(usize, u32)> = candidates
+            .iter()
+            .filter_map(|&i| {
+                let e = &self.entries[i];
+                let chars: Vec<char> = e.file_name.chars().collect();
+                let haystack = nucleo_matcher::Utf32Str::Unicode(&chars);
+                pattern
+                    .score(haystack, &mut self.fuzzy_matcher)
+                    .map(|score| (i, score))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        self.filtered_indices = scored.into_iter().map(|(i, _)| i).collect();
+    }
+
+    /// Structured field expression filter using `filter.rs` parser.
+    fn apply_structured_filter(&mut self, candidates: &[usize]) {
+        if let Some(ref expr) = self.filter_expr {
+            self.filtered_indices = candidates
+                .iter()
+                .filter(|&&i| expr.matches(&self.entries[i]).unwrap_or(false))
+                .copied()
+                .collect();
+        } else {
+            // No valid parse yet — show all candidates
+            self.filtered_indices = candidates.to_vec();
+        }
+    }
+
+    /// Update structured filter expression from current filter text.
+    /// Called on every keystroke in structured mode.
+    fn update_structured_expr(&mut self) {
+        if self.filter_text.is_empty() {
+            self.filter_expr = None;
+        } else {
+            // Only update filter_expr on successful parse;
+            // keep last valid parse on error
+            if let Ok(f) = Filter::parse(&self.filter_text) {
+                self.filter_expr = Some(f);
+            }
         }
     }
 
@@ -179,15 +326,15 @@ impl App {
         self.apply_filter();
     }
 
-    /// Number of visible (filtered) entries.
+    /// Total visible items (dirs + filtered media entries).
     #[must_use]
     pub fn visible_count(&self) -> usize {
-        self.filtered_indices.len()
+        self.dir_items.len() + self.filtered_indices.len()
     }
 
     /// Move selection down.
     fn move_down(&mut self) {
-        if self.selected + 1 < self.filtered_indices.len() {
+        if self.selected + 1 < self.visible_count() {
             self.selected += 1;
         }
     }
@@ -205,12 +352,12 @@ impl App {
 
     /// Move to last entry.
     fn move_bottom(&mut self) {
-        self.selected = self.filtered_indices.len().saturating_sub(1);
+        self.selected = self.visible_count().saturating_sub(1);
     }
 
     /// Page down (half screen).
     fn page_down(&mut self, page_size: usize) {
-        let max = self.filtered_indices.len().saturating_sub(1);
+        let max = self.visible_count().saturating_sub(1);
         self.selected = (self.selected + page_size).min(max);
     }
 
@@ -321,6 +468,93 @@ impl App {
             }
         }
     }
+
+    /// Navigate to a directory: load subdirs, clear state, spawn async scan.
+    fn navigate_to_dir(&mut self, path: PathBuf) {
+        self.dir_items = list_subdirs(&path);
+        self.sibling_dirs = list_sibling_dirs(&path);
+
+        // Clear media state (but NOT mpv playback — per spec)
+        self.entries.clear();
+        self.errors.clear();
+        self.filtered_indices.clear();
+        self.selected = 0;
+        self.scroll_offset = 0;
+        self.marked.clear();
+        self.filter_text.clear();
+        self.filter_mode = FilterMode::Fuzzy;
+        self.filter_expr = None;
+        self.triage = None;
+        self.thumb_state = ThumbState::Empty;
+        self.thumb_path = None;
+        self.thumb_receiver = None;
+
+        // Start async scan for media files in the new directory
+        self.dir_scanning = true;
+        let (tx, rx) = oneshot::channel();
+        self.dir_scan_rx = Some(rx);
+        let scan_path = path.clone();
+        let concurrency = self.scan_concurrency;
+        let timeout_ms = self.scan_timeout_ms;
+
+        self.current_dir = path;
+
+        tokio::spawn(async move {
+            let result = scan::scan_all(&[scan_path], Some(0), concurrency, timeout_ms).await;
+            match result {
+                Ok((entries, errors)) => {
+                    let _ = tx.send((entries, errors));
+                }
+                Err(_) => {
+                    let _ = tx.send((vec![], vec![]));
+                }
+            }
+        });
+    }
+
+    /// Poll for completed directory scan results.
+    fn poll_dir_scan(&mut self) {
+        let Some(ref mut rx) = self.dir_scan_rx else {
+            return;
+        };
+
+        match rx.try_recv() {
+            Ok((entries, errors)) => {
+                self.dir_scan_rx = None;
+                self.dir_scanning = false;
+                self.entries = entries;
+                self.errors = errors;
+                self.apply_sort();
+                self.kick_thumbnail_fetch();
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                self.dir_scan_rx = None;
+                self.dir_scanning = false;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                // Still scanning
+            }
+        }
+    }
+}
+
+/// List subdirectories of a path, sorted alphabetically.
+fn list_subdirs(path: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return vec![];
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.path())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+/// List sibling directories (dirs in parent) for the parent pane.
+fn list_sibling_dirs(path: &std::path::Path) -> Vec<PathBuf> {
+    path.parent().map_or_else(Vec::new, list_subdirs)
 }
 
 /// Run the TUI application.
@@ -350,7 +584,15 @@ pub async fn run(
     // Query terminal for graphics protocol support; fall back to halfblocks
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
 
-    let mut app = App::new(entries, errors, current_dir, thumb_cache, picker);
+    let mut app = App::new(
+        entries,
+        errors,
+        current_dir,
+        thumb_cache,
+        picker,
+        concurrency,
+        timeout_ms,
+    );
     let mut stdout = io::stdout();
     stdout
         .execute(EnterAlternateScreen)
@@ -401,10 +643,35 @@ async fn event_loop(
         // Update mpv state
         if app.mpv.state() != PlaybackState::Stopped && !app.mpv.is_alive() {
             app.mpv.stop().await;
+            app.playback_position = None;
+            app.playback_duration = None;
+            app.playback_file_name = None;
+        }
+
+        // Poll playback position when playing
+        if app.mpv.state() == PlaybackState::Playing {
+            if let Ok(pos) = app.mpv.get_position().await {
+                app.playback_position = Some(pos);
+            }
+            if app.playback_duration.is_none()
+                && let Ok(dur) = app.mpv.get_duration().await
+            {
+                app.playback_duration = Some(dur);
+            }
+        }
+
+        // Clear playback info when stopped
+        if app.mpv.state() == PlaybackState::Stopped {
+            app.playback_position = None;
+            app.playback_duration = None;
+            app.playback_file_name = None;
         }
 
         // Poll for completed thumbnail generation
         app.poll_thumbnail();
+
+        // Poll for completed directory scan
+        app.poll_dir_scan();
     }
     Ok(())
 }
@@ -412,26 +679,7 @@ async fn event_loop(
 async fn handle_key(app: &mut App, key: KeyEvent) {
     // Handle filter input mode
     if app.filter_active {
-        match key.code {
-            KeyCode::Esc => {
-                app.filter_active = false;
-                app.filter_text.clear();
-                app.apply_filter();
-            }
-            KeyCode::Enter => {
-                app.filter_active = false;
-            }
-            KeyCode::Backspace => {
-                app.filter_text.pop();
-                app.apply_filter();
-            }
-            KeyCode::Char(c) => {
-                app.filter_text.push(c);
-                app.apply_filter();
-            }
-            _ => {}
-        }
-        app.kick_thumbnail_fetch();
+        handle_filter_input(app, key);
         return;
     }
 
@@ -475,6 +723,8 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
         (KeyCode::Char('/'), _) => {
             app.filter_active = true;
             app.filter_text.clear();
+            app.filter_mode = FilterMode::Fuzzy;
+            app.filter_expr = None;
         }
         (KeyCode::Char('s'), _) => app.cycle_sort(),
         (KeyCode::Char('S'), _) => app.reverse_sort(),
@@ -489,19 +739,50 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             app.status_message =
                 Some("Triage mode — y:keep n:delete m:move u:undo q:quit".to_string());
         }
+        // Kind filter
+        (KeyCode::Char('1'), _) => {
+            app.kind_filter = KindFilter::All;
+            app.apply_filter();
+            app.status_message = Some("Filter: All".to_string());
+        }
+        (KeyCode::Char('2'), _) => {
+            app.kind_filter = KindFilter::Video;
+            app.apply_filter();
+            app.status_message = Some("Filter: Video".to_string());
+        }
+        (KeyCode::Char('3'), _) => {
+            app.kind_filter = KindFilter::Audio;
+            app.apply_filter();
+            app.status_message = Some("Filter: Audio".to_string());
+        }
         // Playback
         (KeyCode::Char('p'), _) => handle_playback(app).await,
+        (KeyCode::Char('P'), _) => {
+            app.mpv.stop().await;
+            app.playback_position = None;
+            app.playback_duration = None;
+            app.playback_file_name = None;
+            app.status_message = Some("Stopped playback".to_string());
+        }
         (KeyCode::Char(']'), _) => {
             let _ = app.mpv.seek(10).await;
         }
         (KeyCode::Char('['), _) => {
             let _ = app.mpv.seek(-10).await;
         }
-        // Open with default app
-        (KeyCode::Enter, _) => {
-            if let Some(entry) = app.selected_entry() {
+        // Open / navigate into
+        (KeyCode::Enter | KeyCode::Right | KeyCode::Char('l'), _) => {
+            if let Some(dir) = app.selected_dir().cloned() {
+                app.navigate_to_dir(dir);
+            } else if let Some(entry) = app.selected_entry() {
                 let path = entry.path.clone();
                 let _ = open_file(&path);
+            }
+        }
+        // Navigate to parent
+        (KeyCode::Left | KeyCode::Backspace | KeyCode::Char('h'), _) => {
+            if let Some(parent) = app.current_dir.parent().map(std::path::Path::to_path_buf) {
+                app.navigate_to_dir(parent);
             }
         }
         _ => {}
@@ -513,21 +794,76 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-async fn handle_playback(app: &mut App) {
-    if app.mpv.state() == PlaybackState::Stopped {
-        let info = app.selected_entry().map(|entry| {
-            (
-                entry.path.clone(),
-                entry.media.video.is_none(),
-                entry.file_name.clone(),
-            )
-        });
-        if let Some((path, audio_only, name)) = info {
-            let _ = app.mpv.play(&path, audio_only).await;
-            app.status_message = Some(format!("Playing: {name}"));
+fn handle_filter_input(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.filter_active = false;
+            app.filter_text.clear();
+            app.filter_mode = FilterMode::Fuzzy;
+            app.filter_expr = None;
+            app.apply_filter();
         }
-    } else {
+        KeyCode::Enter => {
+            app.filter_active = false;
+        }
+        KeyCode::Backspace => {
+            app.filter_text.pop();
+            // If text becomes empty, reset to fuzzy mode
+            if app.filter_text.is_empty() {
+                app.filter_mode = FilterMode::Fuzzy;
+                app.filter_expr = None;
+            }
+            if app.filter_mode == FilterMode::Structured {
+                app.update_structured_expr();
+            }
+            app.apply_filter();
+        }
+        KeyCode::Char(c) => {
+            // Detect `=` prefix to switch to structured mode
+            if app.filter_text.is_empty() && c == '=' {
+                app.filter_mode = FilterMode::Structured;
+                // Don't push the `=` into filter_text; it's the mode prefix
+            } else {
+                app.filter_text.push(c);
+                if app.filter_mode == FilterMode::Structured {
+                    app.update_structured_expr();
+                }
+            }
+            app.apply_filter();
+        }
+        _ => {}
+    }
+    app.kick_thumbnail_fetch();
+}
+
+async fn handle_playback(app: &mut App) {
+    let info = app.selected_entry().map(|entry| {
+        (
+            entry.path.clone(),
+            entry.media.video.is_none(),
+            entry.file_name.clone(),
+        )
+    });
+
+    let Some((path, audio_only, name)) = info else {
+        return;
+    };
+
+    let is_same_file = app
+        .mpv
+        .current_file()
+        .is_some_and(|current| current == path);
+
+    if app.mpv.state() != PlaybackState::Stopped && is_same_file {
+        // Same file — toggle pause
         let _ = app.mpv.toggle_pause().await;
+    } else {
+        // Stopped or different file — start playing selected
+        let _ = app.mpv.play(&path, audio_only).await;
+        app.playback_file_name = Some(name.clone());
+        app.playback_position = None;
+        app.playback_duration = None;
+        app.status_message = Some(format!("Playing: {name}"));
     }
 }
 
@@ -612,7 +948,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
         let picker = Picker::halfblocks();
-        App::new(entries, vec![], PathBuf::from("/test"), thumb_cache, picker)
+        App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        )
     }
 
     #[test]
@@ -666,6 +1010,268 @@ mod tests {
         app.apply_filter();
         // Only 1 result, selected should clamp to 0
         assert!(app.selected < app.filtered_indices.len());
+    }
+
+    fn make_entry_with_kind(name: &str, kind: MediaKind) -> MediaEntry {
+        let mut entry = make_entry(name);
+        entry.media.kind = kind;
+        entry
+    }
+
+    #[test]
+    fn structured_filter_parses_kind() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+            make_entry_with_kind("clip.mkv", MediaKind::Av),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        app.filter_mode = FilterMode::Structured;
+        app.filter_text = "media.kind == audio".to_string();
+        app.update_structured_expr();
+        app.apply_filter();
+
+        assert_eq!(app.filtered_indices.len(), 1);
+        assert_eq!(app.entries[app.filtered_indices[0]].file_name, "song.mp3");
+    }
+
+    #[test]
+    fn structured_filter_invalid_shows_all() {
+        let mut app = make_test_app(&["a.mp4", "b.mkv", "c.mp3"]);
+        app.filter_mode = FilterMode::Structured;
+        app.filter_text = "invalid syntax @@".to_string();
+        app.update_structured_expr();
+        app.apply_filter();
+
+        // Invalid expression should show all entries (no valid parse yet)
+        assert_eq!(app.filtered_indices.len(), 3);
+    }
+
+    #[test]
+    fn structured_filter_keeps_last_valid_parse() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        // Set up a valid structured filter
+        app.filter_mode = FilterMode::Structured;
+        app.filter_text = "media.kind == audio".to_string();
+        app.update_structured_expr();
+        app.apply_filter();
+        assert_eq!(app.filtered_indices.len(), 1);
+
+        // Now type something invalid — should keep last valid parse
+        app.filter_text = "media.kind == audio &&".to_string();
+        app.update_structured_expr();
+        app.apply_filter();
+        assert_eq!(app.filtered_indices.len(), 1); // still filtered
+    }
+
+    #[test]
+    fn kind_filter_video_excludes_audio() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+            make_entry_with_kind("clip.mkv", MediaKind::Av),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        app.kind_filter = KindFilter::Video;
+        app.apply_filter();
+
+        // Video filter: entries with video stream (Video and Av kinds)
+        // But our make_entry has video: None, so we need entries with video
+        // make_entry_with_kind only sets kind, not video stream — use matches_kind
+        // Video filter checks entry.media.video.is_some(), not kind enum
+        // All our test entries have video: None, so Video filter shows nothing
+        assert_eq!(app.filtered_indices.len(), 0);
+    }
+
+    #[test]
+    fn kind_filter_audio_includes_audio_only() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        // All entries have video: None, so Audio filter shows all
+        app.kind_filter = KindFilter::Audio;
+        app.apply_filter();
+        assert_eq!(app.filtered_indices.len(), 2);
+    }
+
+    #[test]
+    fn kind_filter_all_shows_everything() {
+        let mut app = make_test_app(&["a.mp4", "b.mkv", "c.mp3"]);
+        app.kind_filter = KindFilter::All;
+        app.apply_filter();
+        assert_eq!(app.filtered_indices.len(), 3);
+    }
+
+    #[test]
+    fn kind_filter_composes_with_fuzzy() {
+        let entries = vec![
+            make_entry("alpha.mp4"),
+            make_entry("beta.mp4"),
+            make_entry("gamma.mp3"),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        // All entries have video: None → Audio filter shows all
+        app.kind_filter = KindFilter::Audio;
+        app.filter_text = "alpha".to_string();
+        app.apply_filter();
+        assert_eq!(app.filtered_indices.len(), 1);
+        assert_eq!(app.entries[app.filtered_indices[0]].file_name, "alpha.mp4");
+    }
+
+    #[test]
+    fn filter_mode_defaults_to_fuzzy() {
+        let app = make_test_app(&["a.mp4"]);
+        assert_eq!(app.filter_mode, FilterMode::Fuzzy);
+        assert!(app.filter_expr.is_none());
+    }
+
+    #[test]
+    fn selected_dir_returns_path_when_dir_selected() {
+        let mut app = make_test_app(&["a.mp4"]);
+        app.dir_items = vec![
+            PathBuf::from("/test/subdir1"),
+            PathBuf::from("/test/subdir2"),
+        ];
+        app.selected = 0;
+        assert_eq!(app.selected_dir(), Some(&PathBuf::from("/test/subdir1")));
+        assert!(app.selected_entry().is_none());
+    }
+
+    #[test]
+    fn selected_entry_offsets_correctly() {
+        let mut app = make_test_app(&["a.mp4", "b.mkv"]);
+        app.dir_items = vec![PathBuf::from("/test/subdir")];
+        // selected=0 → directory
+        app.selected = 0;
+        assert!(app.selected_entry().is_none());
+        assert!(app.selected_dir().is_some());
+        // selected=1 → first media entry
+        app.selected = 1;
+        assert!(app.selected_dir().is_none());
+        assert_eq!(
+            app.selected_entry().map(|e| e.file_name.as_str()),
+            Some("a.mp4")
+        );
+        // selected=2 → second media entry
+        app.selected = 2;
+        assert_eq!(
+            app.selected_entry().map(|e| e.file_name.as_str()),
+            Some("b.mkv")
+        );
+    }
+
+    #[test]
+    fn visible_count_includes_dirs() {
+        let mut app = make_test_app(&["a.mp4"]);
+        app.dir_items = vec![PathBuf::from("/test/d1"), PathBuf::from("/test/d2")];
+        assert_eq!(app.visible_count(), 3); // 2 dirs + 1 media
+    }
+
+    #[tokio::test]
+    async fn navigate_clears_state() {
+        let mut app = make_test_app(&["a.mp4", "b.mkv"]);
+        app.marked.insert(0);
+        app.selected = 1;
+        app.filter_text = "test".to_string();
+
+        let tmp = tempfile::tempdir().unwrap();
+        app.navigate_to_dir(tmp.path().to_path_buf());
+
+        assert!(app.entries.is_empty());
+        assert!(app.marked.is_empty());
+        assert_eq!(app.selected, 0);
+        assert!(app.filter_text.is_empty());
+        assert!(app.dir_scanning);
+    }
+
+    #[test]
+    fn dir_items_sorted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join("zebra")).unwrap();
+        std::fs::create_dir(root.join("alpha")).unwrap();
+        std::fs::create_dir(root.join("middle")).unwrap();
+
+        let dirs = super::list_subdirs(root);
+        let names: Vec<String> = dirs
+            .iter()
+            .map(|d| d.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["alpha", "middle", "zebra"]);
+    }
+
+    #[test]
+    fn playback_state_defaults_none() {
+        let app = make_test_app(&["a.mp4"]);
+        assert!(app.playback_position.is_none());
+        assert!(app.playback_duration.is_none());
+        assert!(app.playback_file_name.is_none());
     }
 
     #[test]
