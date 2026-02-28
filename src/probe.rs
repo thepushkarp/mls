@@ -164,6 +164,7 @@ fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
     let duration_ms = fmt
         .and_then(|f| f.duration.as_deref())
         .and_then(|d| d.parse::<f64>().ok())
+        .filter(|&secs| secs >= 0.0)
         .map(|secs| (secs * 1000.0) as u64);
 
     let overall_bitrate_bps = fmt
@@ -468,6 +469,16 @@ mod tests {
         };
         let info = build_media_info(&raw);
         assert_eq!(info.duration_ms, Some(120_500));
+    }
+
+    #[test]
+    fn build_media_info_negative_duration_yields_none() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(Some("-5.0"), None)),
+            streams: vec![make_video_stream()],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.duration_ms, None);
     }
 
     #[test]
