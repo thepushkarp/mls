@@ -87,3 +87,299 @@ fn compare_by_key(
         }
     }
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::types::{
+        AudioInfo, CodecInfo, ContainerInfo, FsInfo, MediaInfo, MediaKind, MediaTags, ProbeInfo,
+        VideoInfo,
+    };
+    use std::path::PathBuf;
+
+    fn make_entry_with(
+        name: &str,
+        size: u64,
+        duration_ms: Option<u64>,
+    ) -> MediaEntry {
+        MediaEntry {
+            path: PathBuf::from(format!("/test/{name}")),
+            file_name: name.to_string(),
+            extension: "mp4".to_string(),
+            fs: FsInfo {
+                size_bytes: size,
+                modified_at: None,
+                created_at: None,
+            },
+            media: MediaInfo {
+                kind: MediaKind::Video,
+                container: ContainerInfo {
+                    format_name: "mp4".to_string(),
+                    format_primary: "mp4".to_string(),
+                },
+                duration_ms,
+                overall_bitrate_bps: None,
+                video: None,
+                audio: None,
+                streams: vec![],
+                tags: MediaTags::default(),
+            },
+            probe: ProbeInfo {
+                backend: "ffprobe".to_string(),
+                took_ms: 10,
+                error: None,
+            },
+        }
+    }
+
+    fn make_entry_with_video(
+        name: &str,
+        width: u32,
+        height: u32,
+        codec: &str,
+    ) -> MediaEntry {
+        let mut entry = make_entry_with(name, 100, None);
+        entry.media.video = Some(VideoInfo {
+            width,
+            height,
+            fps: None,
+            bitrate_bps: None,
+            codec: CodecInfo {
+                name: codec.to_string(),
+                profile: None,
+                level: None,
+            },
+            pixel_format: None,
+        });
+        entry
+    }
+
+    fn make_entry_with_audio_codec(name: &str, codec: &str) -> MediaEntry {
+        let mut entry = make_entry_with(name, 100, None);
+        entry.media.audio = Some(AudioInfo {
+            channels: 2,
+            channel_layout: None,
+            sample_rate_hz: None,
+            bitrate_bps: None,
+            codec: CodecInfo {
+                name: codec.to_string(),
+                profile: None,
+                level: None,
+            },
+        });
+        entry
+    }
+
+    // --- parse_sort_spec ---
+
+    #[test]
+    fn parse_sort_spec_name_default_asc() {
+        assert_eq!(parse_sort_spec("name"), Some((SortKey::Name, SortDir::Asc)));
+    }
+
+    #[test]
+    fn parse_sort_spec_duration_desc() {
+        assert_eq!(
+            parse_sort_spec("duration:desc"),
+            Some((SortKey::Duration, SortDir::Desc))
+        );
+    }
+
+    #[test]
+    fn parse_sort_spec_duration_ms_alias() {
+        assert_eq!(
+            parse_sort_spec("duration_ms:asc"),
+            Some((SortKey::Duration, SortDir::Asc))
+        );
+    }
+
+    #[test]
+    fn parse_sort_spec_date_alias() {
+        assert_eq!(
+            parse_sort_spec("date"),
+            Some((SortKey::Modified, SortDir::Asc))
+        );
+    }
+
+    #[test]
+    fn parse_sort_spec_modified_alias() {
+        assert_eq!(
+            parse_sort_spec("modified:desc"),
+            Some((SortKey::Modified, SortDir::Desc))
+        );
+    }
+
+    #[test]
+    fn parse_sort_spec_all_keys_recognized() {
+        let keys = [
+            "path", "name", "size", "date", "modified",
+            "duration", "duration_ms", "resolution", "codec", "bitrate",
+        ];
+        for key in keys {
+            assert!(
+                parse_sort_spec(key).is_some(),
+                "key '{key}' should be recognized"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_sort_spec_unknown_returns_none() {
+        assert_eq!(parse_sort_spec("unknown"), None);
+        assert_eq!(parse_sort_spec(""), None);
+    }
+
+    #[test]
+    fn parse_sort_spec_explicit_asc() {
+        let (_, dir) = parse_sort_spec("size:asc").unwrap();
+        assert_eq!(dir, SortDir::Asc);
+    }
+
+    #[test]
+    fn parse_sort_spec_invalid_dir_defaults_asc() {
+        let (_, dir) = parse_sort_spec("size:garbage").unwrap();
+        assert_eq!(dir, SortDir::Asc);
+    }
+
+    // --- sort_entries ---
+
+    #[test]
+    fn sort_by_name_asc() {
+        let mut entries = vec![
+            make_entry_with("charlie.mp4", 100, None),
+            make_entry_with("alpha.mp4", 200, None),
+            make_entry_with("bravo.mp4", 150, None),
+        ];
+        sort_entries(&mut entries, SortKey::Name, SortDir::Asc);
+        let names: Vec<&str> = entries.iter().map(|e| e.file_name.as_str()).collect();
+        assert_eq!(names, vec!["alpha.mp4", "bravo.mp4", "charlie.mp4"]);
+    }
+
+    #[test]
+    fn sort_by_name_desc() {
+        let mut entries = vec![
+            make_entry_with("alpha.mp4", 100, None),
+            make_entry_with("charlie.mp4", 200, None),
+            make_entry_with("bravo.mp4", 150, None),
+        ];
+        sort_entries(&mut entries, SortKey::Name, SortDir::Desc);
+        let names: Vec<&str> = entries.iter().map(|e| e.file_name.as_str()).collect();
+        assert_eq!(names, vec!["charlie.mp4", "bravo.mp4", "alpha.mp4"]);
+    }
+
+    #[test]
+    fn sort_by_name_case_insensitive() {
+        let mut entries = vec![
+            make_entry_with("Zebra.mp4", 100, None),
+            make_entry_with("alpha.mp4", 100, None),
+        ];
+        sort_entries(&mut entries, SortKey::Name, SortDir::Asc);
+        assert_eq!(entries[0].file_name, "alpha.mp4");
+        assert_eq!(entries[1].file_name, "Zebra.mp4");
+    }
+
+    #[test]
+    fn sort_by_size_asc() {
+        let mut entries = vec![
+            make_entry_with("big.mp4", 300, None),
+            make_entry_with("small.mp4", 100, None),
+            make_entry_with("medium.mp4", 200, None),
+        ];
+        sort_entries(&mut entries, SortKey::Size, SortDir::Asc);
+        let sizes: Vec<u64> = entries.iter().map(|e| e.fs.size_bytes).collect();
+        assert_eq!(sizes, vec![100, 200, 300]);
+    }
+
+    #[test]
+    fn sort_by_size_desc() {
+        let mut entries = vec![
+            make_entry_with("small.mp4", 100, None),
+            make_entry_with("big.mp4", 300, None),
+        ];
+        sort_entries(&mut entries, SortKey::Size, SortDir::Desc);
+        assert_eq!(entries[0].fs.size_bytes, 300);
+        assert_eq!(entries[1].fs.size_bytes, 100);
+    }
+
+    #[test]
+    fn sort_by_duration_asc() {
+        let mut entries = vec![
+            make_entry_with("long.mp4", 100, Some(300_000)),
+            make_entry_with("short.mp4", 100, Some(60_000)),
+            make_entry_with("medium.mp4", 100, Some(120_000)),
+        ];
+        sort_entries(&mut entries, SortKey::Duration, SortDir::Asc);
+        let durations: Vec<Option<u64>> =
+            entries.iter().map(|e| e.media.duration_ms).collect();
+        assert_eq!(
+            durations,
+            vec![Some(60_000), Some(120_000), Some(300_000)]
+        );
+    }
+
+    #[test]
+    fn sort_by_resolution() {
+        let mut entries = vec![
+            make_entry_with_video("4k.mp4", 3840, 2160, "h264"),
+            make_entry_with_video("720p.mp4", 1280, 720, "h264"),
+            make_entry_with_video("1080p.mp4", 1920, 1080, "h264"),
+        ];
+        sort_entries(&mut entries, SortKey::Resolution, SortDir::Asc);
+        assert_eq!(entries[0].file_name, "720p.mp4");
+        assert_eq!(entries[1].file_name, "1080p.mp4");
+        assert_eq!(entries[2].file_name, "4k.mp4");
+    }
+
+    #[test]
+    fn sort_by_codec() {
+        let mut entries = vec![
+            make_entry_with_video("vp9.mp4", 1920, 1080, "vp9"),
+            make_entry_with_video("h264.mp4", 1920, 1080, "h264"),
+            make_entry_with_video("av1.mp4", 1920, 1080, "av1"),
+        ];
+        sort_entries(&mut entries, SortKey::Codec, SortDir::Asc);
+        assert_eq!(entries[0].file_name, "av1.mp4");
+        assert_eq!(entries[1].file_name, "h264.mp4");
+        assert_eq!(entries[2].file_name, "vp9.mp4");
+    }
+
+    #[test]
+    fn sort_by_codec_falls_back_to_audio() {
+        let mut entries = vec![
+            make_entry_with_audio_codec("opus.mp3", "opus"),
+            make_entry_with_audio_codec("aac.mp3", "aac"),
+        ];
+        sort_entries(&mut entries, SortKey::Codec, SortDir::Asc);
+        assert_eq!(entries[0].file_name, "aac.mp3");
+        assert_eq!(entries[1].file_name, "opus.mp3");
+    }
+
+    #[test]
+    fn sort_by_bitrate() {
+        let mut entry_a = make_entry_with("high.mp4", 100, None);
+        entry_a.media.overall_bitrate_bps = Some(10_000_000);
+        let mut entry_b = make_entry_with("low.mp4", 100, None);
+        entry_b.media.overall_bitrate_bps = Some(1_000_000);
+
+        let mut entries = vec![entry_a, entry_b];
+        sort_entries(&mut entries, SortKey::Bitrate, SortDir::Asc);
+        assert_eq!(entries[0].file_name, "low.mp4");
+        assert_eq!(entries[1].file_name, "high.mp4");
+    }
+
+    #[test]
+    fn sort_empty_slice() {
+        let mut entries: Vec<MediaEntry> = vec![];
+        sort_entries(&mut entries, SortKey::Name, SortDir::Asc);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn sort_single_element() {
+        let mut entries = vec![make_entry_with("solo.mp4", 100, None)];
+        sort_entries(&mut entries, SortKey::Name, SortDir::Asc);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file_name, "solo.mp4");
+    }
+}

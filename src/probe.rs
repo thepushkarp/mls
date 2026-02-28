@@ -277,3 +277,445 @@ fn extract_tags(tags: &serde_json::Map<String, serde_json::Value>) -> MediaTags 
         genre: get("genre"),
     }
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // --- parse_rational_fps ---
+
+    #[test]
+    fn parse_fps_standard_24() {
+        let fps = parse_rational_fps("24000/1001").unwrap();
+        assert_eq!(fps.num, 24000);
+        assert_eq!(fps.den, 1001);
+    }
+
+    #[test]
+    fn parse_fps_integer_30() {
+        let fps = parse_rational_fps("30/1").unwrap();
+        assert_eq!(fps.num, 30);
+        assert_eq!(fps.den, 1);
+    }
+
+    #[test]
+    fn parse_fps_60() {
+        let fps = parse_rational_fps("60/1").unwrap();
+        assert_eq!(fps.num, 60);
+        assert_eq!(fps.den, 1);
+    }
+
+    #[test]
+    fn parse_fps_zero_den_returns_none() {
+        assert!(parse_rational_fps("30/0").is_none());
+    }
+
+    #[test]
+    fn parse_fps_no_slash_returns_none() {
+        assert!(parse_rational_fps("30").is_none());
+    }
+
+    #[test]
+    fn parse_fps_non_numeric_returns_none() {
+        assert!(parse_rational_fps("abc/def").is_none());
+    }
+
+    #[test]
+    fn parse_fps_empty_returns_none() {
+        assert!(parse_rational_fps("").is_none());
+    }
+
+    // --- extract_tags ---
+
+    #[test]
+    fn extract_tags_all_fields() {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "title".to_string(),
+            serde_json::Value::String("My Song".to_string()),
+        );
+        map.insert(
+            "artist".to_string(),
+            serde_json::Value::String("Artist".to_string()),
+        );
+        map.insert(
+            "album".to_string(),
+            serde_json::Value::String("Album".to_string()),
+        );
+        map.insert(
+            "date".to_string(),
+            serde_json::Value::String("2024".to_string()),
+        );
+        map.insert(
+            "genre".to_string(),
+            serde_json::Value::String("Rock".to_string()),
+        );
+
+        let tags = extract_tags(&map);
+        assert_eq!(tags.title.as_deref(), Some("My Song"));
+        assert_eq!(tags.artist.as_deref(), Some("Artist"));
+        assert_eq!(tags.album.as_deref(), Some("Album"));
+        assert_eq!(tags.date.as_deref(), Some("2024"));
+        assert_eq!(tags.genre.as_deref(), Some("Rock"));
+    }
+
+    #[test]
+    fn extract_tags_uppercase_fallback() {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "TITLE".to_string(),
+            serde_json::Value::String("Upper".to_string()),
+        );
+        map.insert(
+            "ARTIST".to_string(),
+            serde_json::Value::String("ArtistUpper".to_string()),
+        );
+
+        let tags = extract_tags(&map);
+        assert_eq!(tags.title.as_deref(), Some("Upper"));
+        assert_eq!(tags.artist.as_deref(), Some("ArtistUpper"));
+    }
+
+    #[test]
+    fn extract_tags_empty_map() {
+        let map = serde_json::Map::new();
+        let tags = extract_tags(&map);
+        assert!(tags.title.is_none());
+        assert!(tags.artist.is_none());
+        assert!(tags.album.is_none());
+        assert!(tags.date.is_none());
+        assert!(tags.genre.is_none());
+    }
+
+    #[test]
+    fn extract_tags_ignores_non_string_values() {
+        let mut map = serde_json::Map::new();
+        map.insert("title".to_string(), serde_json::Value::Number(42.into()));
+        let tags = extract_tags(&map);
+        assert!(tags.title.is_none());
+    }
+
+    // --- build_media_info ---
+
+    fn make_video_stream() -> FfprobeStream {
+        FfprobeStream {
+            index: Some(0),
+            codec_type: Some("video".to_string()),
+            codec_name: Some("h264".to_string()),
+            profile: Some("High".to_string()),
+            level: Some(41),
+            width: Some(1920),
+            height: Some(1080),
+            r_frame_rate: Some("24/1".to_string()),
+            bit_rate: Some("4500000".to_string()),
+            sample_rate: None,
+            channels: None,
+            channel_layout: None,
+            pix_fmt: Some("yuv420p".to_string()),
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    fn make_audio_stream() -> FfprobeStream {
+        FfprobeStream {
+            index: Some(1),
+            codec_type: Some("audio".to_string()),
+            codec_name: Some("aac".to_string()),
+            profile: Some("LC".to_string()),
+            level: None,
+            width: None,
+            height: None,
+            r_frame_rate: None,
+            bit_rate: Some("128000".to_string()),
+            sample_rate: Some("48000".to_string()),
+            channels: Some(2),
+            channel_layout: Some("stereo".to_string()),
+            pix_fmt: None,
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    fn make_format(
+        duration: Option<&str>,
+        bitrate: Option<&str>,
+    ) -> FfprobeFormat {
+        FfprobeFormat {
+            format_name: Some("mov,mp4,m4a,3gp,3g2,mj2".to_string()),
+            duration: duration.map(String::from),
+            bit_rate: bitrate.map(String::from),
+            tags: None,
+        }
+    }
+
+    #[test]
+    fn build_media_info_av_kind() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(Some("120.5"), Some("5000000"))),
+            streams: vec![make_video_stream(), make_audio_stream()],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.kind, MediaKind::Av);
+        assert!(info.video.is_some());
+        assert!(info.audio.is_some());
+    }
+
+    #[test]
+    fn build_media_info_duration_parsed() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(Some("120.5"), None)),
+            streams: vec![make_video_stream()],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.duration_ms, Some(120_500));
+    }
+
+    #[test]
+    fn build_media_info_bitrate_parsed() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(None, Some("5000000"))),
+            streams: vec![make_video_stream()],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.overall_bitrate_bps, Some(5_000_000));
+    }
+
+    #[test]
+    fn build_media_info_video_only() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(None, None)),
+            streams: vec![make_video_stream()],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.kind, MediaKind::Video);
+        assert!(info.video.is_some());
+        assert!(info.audio.is_none());
+    }
+
+    #[test]
+    fn build_media_info_audio_only() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(None, None)),
+            streams: vec![make_audio_stream()],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.kind, MediaKind::Audio);
+        assert!(info.video.is_none());
+        assert!(info.audio.is_some());
+    }
+
+    #[test]
+    fn build_media_info_no_streams() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(None, None)),
+            streams: vec![],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.kind, MediaKind::Audio);
+        assert!(info.video.is_none());
+        assert!(info.audio.is_none());
+    }
+
+    #[test]
+    fn build_media_info_no_format() {
+        let raw = FfprobeOutput {
+            format: None,
+            streams: vec![],
+        };
+        let info = build_media_info(&raw);
+        assert!(info.duration_ms.is_none());
+        assert!(info.overall_bitrate_bps.is_none());
+        assert!(info.container.format_name.is_empty());
+    }
+
+    #[test]
+    fn build_media_info_container_primary() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(None, None)),
+            streams: vec![make_video_stream()],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.container.format_primary, "mov");
+        assert!(info.container.format_name.contains("mp4"));
+    }
+
+    // --- build_video_info ---
+
+    #[test]
+    fn build_video_info_fields() {
+        let stream = make_video_stream();
+        let vid = build_video_info(&stream);
+        assert_eq!(vid.width, 1920);
+        assert_eq!(vid.height, 1080);
+        assert_eq!(vid.codec.name, "h264");
+        assert_eq!(vid.codec.profile.as_deref(), Some("High"));
+        assert_eq!(vid.codec.level.as_deref(), Some("41"));
+        assert_eq!(vid.pixel_format.as_deref(), Some("yuv420p"));
+        assert_eq!(vid.bitrate_bps, Some(4_500_000));
+
+        let fps = vid.fps.unwrap();
+        assert_eq!(fps.num, 24);
+        assert_eq!(fps.den, 1);
+    }
+
+    #[test]
+    fn build_video_info_missing_optionals() {
+        let stream = FfprobeStream {
+            index: Some(0),
+            codec_type: Some("video".to_string()),
+            codec_name: None,
+            profile: None,
+            level: None,
+            width: None,
+            height: None,
+            r_frame_rate: None,
+            bit_rate: None,
+            sample_rate: None,
+            channels: None,
+            channel_layout: None,
+            pix_fmt: None,
+            extra: serde_json::Map::new(),
+        };
+        let vid = build_video_info(&stream);
+        assert_eq!(vid.width, 0);
+        assert_eq!(vid.height, 0);
+        assert!(vid.fps.is_none());
+        assert!(vid.bitrate_bps.is_none());
+        assert!(vid.pixel_format.is_none());
+    }
+
+    // --- build_audio_info ---
+
+    #[test]
+    fn build_audio_info_fields() {
+        let stream = make_audio_stream();
+        let aud = build_audio_info(&stream);
+        assert_eq!(aud.channels, 2);
+        assert_eq!(aud.codec.name, "aac");
+        assert_eq!(aud.codec.profile.as_deref(), Some("LC"));
+        assert_eq!(aud.sample_rate_hz, Some(48000));
+        assert_eq!(aud.bitrate_bps, Some(128_000));
+        assert_eq!(aud.channel_layout.as_deref(), Some("stereo"));
+    }
+
+    #[test]
+    fn build_audio_info_missing_optionals() {
+        let stream = FfprobeStream {
+            index: Some(1),
+            codec_type: Some("audio".to_string()),
+            codec_name: None,
+            profile: None,
+            level: None,
+            width: None,
+            height: None,
+            r_frame_rate: None,
+            bit_rate: None,
+            sample_rate: None,
+            channels: None,
+            channel_layout: None,
+            pix_fmt: None,
+            extra: serde_json::Map::new(),
+        };
+        let aud = build_audio_info(&stream);
+        assert_eq!(aud.channels, 0);
+        assert!(aud.sample_rate_hz.is_none());
+        assert!(aud.bitrate_bps.is_none());
+        assert!(aud.channel_layout.is_none());
+    }
+
+    // --- build_stream_info ---
+
+    #[test]
+    fn build_stream_info_copies_fields() {
+        let stream = make_video_stream();
+        let si = build_stream_info(&stream);
+        assert_eq!(si.index, 0);
+        assert_eq!(si.codec_type, "video");
+        assert_eq!(si.codec_name, "h264");
+        assert_eq!(si.profile.as_deref(), Some("High"));
+    }
+
+    // --- ffprobe JSON deserialization ---
+
+    #[test]
+    fn deserialize_ffprobe_json() {
+        let json = r#"{
+            "format": {
+                "format_name": "matroska,webm",
+                "duration": "90.5",
+                "bit_rate": "2500000"
+            },
+            "streams": [
+                {
+                    "index": 0,
+                    "codec_type": "video",
+                    "codec_name": "vp9",
+                    "width": 1280,
+                    "height": 720,
+                    "r_frame_rate": "30/1"
+                },
+                {
+                    "index": 1,
+                    "codec_type": "audio",
+                    "codec_name": "opus",
+                    "channels": 2,
+                    "sample_rate": "48000"
+                }
+            ]
+        }"#;
+
+        let raw: FfprobeOutput = serde_json::from_str(json).unwrap();
+        let info = build_media_info(&raw);
+        assert_eq!(info.kind, MediaKind::Av);
+        assert_eq!(info.duration_ms, Some(90_500));
+        assert_eq!(info.overall_bitrate_bps, Some(2_500_000));
+        assert_eq!(info.container.format_primary, "matroska");
+
+        let vid = info.video.unwrap();
+        assert_eq!(vid.width, 1280);
+        assert_eq!(vid.height, 720);
+        assert_eq!(vid.codec.name, "vp9");
+
+        let aud = info.audio.unwrap();
+        assert_eq!(aud.codec.name, "opus");
+        assert_eq!(aud.channels, 2);
+        assert_eq!(aud.sample_rate_hz, Some(48000));
+    }
+
+    #[test]
+    fn deserialize_minimal_ffprobe_json() {
+        let json = r#"{"streams": []}"#;
+        let raw: FfprobeOutput = serde_json::from_str(json).unwrap();
+        let info = build_media_info(&raw);
+        assert_eq!(info.kind, MediaKind::Audio);
+        assert!(info.duration_ms.is_none());
+    }
+
+    // --- tags in format ---
+
+    #[test]
+    fn build_media_info_with_tags() {
+        let mut tags_map = serde_json::Map::new();
+        tags_map.insert(
+            "title".to_string(),
+            serde_json::Value::String("Test Video".to_string()),
+        );
+        tags_map.insert(
+            "artist".to_string(),
+            serde_json::Value::String("Test Artist".to_string()),
+        );
+
+        let raw = FfprobeOutput {
+            format: Some(FfprobeFormat {
+                format_name: Some("mp4".to_string()),
+                duration: None,
+                bit_rate: None,
+                tags: Some(tags_map),
+            }),
+            streams: vec![],
+        };
+        let info = build_media_info(&raw);
+        assert_eq!(info.tags.title.as_deref(), Some("Test Video"));
+        assert_eq!(info.tags.artist.as_deref(), Some("Test Artist"));
+    }
+}

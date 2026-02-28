@@ -10,9 +10,21 @@ use std::path::PathBuf;
 /// A triage action that can be undone.
 #[derive(Debug, Clone)]
 pub enum TriageAction {
-    Keep { index: usize },
-    Delete { index: usize, path: PathBuf },
-    Move { index: usize, from: PathBuf, to: PathBuf },
+    Keep {
+        #[expect(dead_code, reason = "will be used for triage undo navigation")]
+        index: usize,
+    },
+    Delete {
+        #[expect(dead_code, reason = "will be used for triage undo navigation")]
+        index: usize,
+        path: PathBuf,
+    },
+    #[expect(dead_code, reason = "move-to-directory triage action not yet implemented")]
+    Move {
+        index: usize,
+        from: PathBuf,
+        to: PathBuf,
+    },
 }
 
 /// Triage mode state.

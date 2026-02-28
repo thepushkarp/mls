@@ -78,11 +78,10 @@ fn render_parent_pane(frame: &mut Frame, app: &App, area: Rect) {
         .current_dir
         .parent()
         .and_then(|p| p.file_name())
-        .map_or("Parent", |n| {
-            // Leak is fine here — these are short-lived frame renders
-            // and ratatui borrows from the frame anyway
-            Box::leak(n.to_string_lossy().into_owned().into_boxed_str())
-        });
+        .map_or_else(
+            || "Parent".to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
 
     let items: Vec<ListItem> = if let Some(parent) = app.current_dir.parent() {
         std::fs::read_dir(parent)
@@ -118,13 +117,11 @@ fn render_parent_pane(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
-    let title = format!(
-        " {} — {} files ",
-        app.current_dir
-            .file_name()
-            .map_or(".", |n| Box::leak(n.to_string_lossy().into_owned().into_boxed_str())),
-        app.visible_count()
-    );
+    let dir_name = app
+        .current_dir
+        .file_name()
+        .map_or_else(|| ".".to_string(), |n| n.to_string_lossy().into_owned());
+    let title = format!(" {dir_name} — {} files ", app.visible_count());
 
     // Calculate visible window
     let inner_height = area.height.saturating_sub(2) as usize;

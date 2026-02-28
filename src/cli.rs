@@ -23,7 +23,6 @@ pub struct Cli {
     pub command: Option<Command>,
 
     /// Paths to scan (defaults to current directory).
-    #[arg(global = true)]
     pub paths: Vec<PathBuf>,
 
     /// Force TUI mode even when piped.

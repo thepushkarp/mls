@@ -52,6 +52,7 @@ pub struct App {
     /// mpv playback controller.
     mpv: MpvController,
     /// Thumbnail cache.
+    #[expect(dead_code, reason = "thumbnail preview not yet wired to UI")]
     thumb_cache: ThumbnailCache,
     /// Triage mode state.
     triage: Option<triage::TriageState>,

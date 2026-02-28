@@ -120,6 +120,7 @@ impl MpvController {
     ///
     /// # Errors
     /// Returns an error if the IPC query fails.
+    #[expect(dead_code, reason = "will be used for playback progress display")]
     pub async fn get_position(&self) -> Result<f64> {
         let resp = self
             .send_command_with_response(

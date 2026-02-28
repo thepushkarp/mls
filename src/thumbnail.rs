@@ -40,6 +40,7 @@ impl ThumbnailCache {
     ///
     /// # Errors
     /// Returns an error if thumbnail generation fails.
+    #[expect(dead_code, reason = "thumbnail preview not yet wired to UI")]
     pub async fn get_or_generate(&self, path: &Path) -> Result<Vec<u8>> {
         let canonical = path.to_path_buf();
 

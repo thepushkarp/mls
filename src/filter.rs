@@ -438,3 +438,362 @@ fn compare_values(
         }
     }
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::types::{
+        AudioInfo, CodecInfo, ContainerInfo, Fps, FsInfo, MediaEntry, MediaInfo, MediaKind,
+        MediaTags, ProbeInfo, VideoInfo,
+    };
+    use std::path::PathBuf;
+
+    fn make_entry() -> MediaEntry {
+        MediaEntry {
+            path: PathBuf::from("/test/video.mp4"),
+            file_name: "video.mp4".to_string(),
+            extension: "mp4".to_string(),
+            fs: FsInfo {
+                size_bytes: 1_000_000,
+                modified_at: None,
+                created_at: None,
+            },
+            media: MediaInfo {
+                kind: MediaKind::Av,
+                container: ContainerInfo {
+                    format_name: "mov,mp4,m4a,3gp,3g2,mj2".to_string(),
+                    format_primary: "mov".to_string(),
+                },
+                duration_ms: Some(120_000),
+                overall_bitrate_bps: Some(5_000_000),
+                video: Some(VideoInfo {
+                    width: 1920,
+                    height: 1080,
+                    fps: Some(Fps { num: 24, den: 1 }),
+                    bitrate_bps: Some(4_500_000),
+                    codec: CodecInfo {
+                        name: "h264".to_string(),
+                        profile: Some("High".to_string()),
+                        level: Some("41".to_string()),
+                    },
+                    pixel_format: Some("yuv420p".to_string()),
+                }),
+                audio: Some(AudioInfo {
+                    channels: 2,
+                    channel_layout: Some("stereo".to_string()),
+                    sample_rate_hz: Some(48000),
+                    bitrate_bps: Some(128_000),
+                    codec: CodecInfo {
+                        name: "aac".to_string(),
+                        profile: Some("LC".to_string()),
+                        level: None,
+                    },
+                }),
+                streams: vec![],
+                tags: MediaTags::default(),
+            },
+            probe: ProbeInfo {
+                backend: "ffprobe".to_string(),
+                took_ms: 50,
+                error: None,
+            },
+        }
+    }
+
+    // --- Lexer tests ---
+
+    #[test]
+    fn lex_simple_comparison() {
+        let mut lexer = Lexer::new("field == 42");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Ident(s) if s == "field"));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Eq)));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - 42.0).abs() < f64::EPSILON));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Eof));
+    }
+
+    #[test]
+    fn lex_string_double_quotes() {
+        let mut lexer = Lexer::new("\"hello\"");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Str(s) if s == "hello"));
+    }
+
+    #[test]
+    fn lex_string_single_quotes() {
+        let mut lexer = Lexer::new("'world'");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Str(s) if s == "world"));
+    }
+
+    #[test]
+    fn lex_all_comparison_operators() {
+        let mut lexer = Lexer::new("== != > >= < <=");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Eq)));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Ne)));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Gt)));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Ge)));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Lt)));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Le)));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Eof));
+    }
+
+    #[test]
+    fn lex_logical_operators() {
+        let mut lexer = Lexer::new("&& || !");
+        assert!(matches!(lexer.next_token().unwrap(), Token::And));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Or));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Not));
+    }
+
+    #[test]
+    fn lex_parens() {
+        let mut lexer = Lexer::new("()");
+        assert!(matches!(lexer.next_token().unwrap(), Token::LParen));
+        assert!(matches!(lexer.next_token().unwrap(), Token::RParen));
+    }
+
+    #[test]
+    fn lex_dotted_field_path() {
+        let mut lexer = Lexer::new("media.video.width");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Ident(s) if s == "media.video.width"));
+    }
+
+    #[test]
+    fn lex_negative_number() {
+        let mut lexer = Lexer::new("-42");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - (-42.0)).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn lex_decimal_number() {
+        let mut lexer = Lexer::new("2.75");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - 2.75).abs() < 0.001));
+    }
+
+    #[test]
+    fn lex_unterminated_string_error() {
+        let mut lexer = Lexer::new("\"hello");
+        assert!(lexer.next_token().is_err());
+    }
+
+    #[test]
+    fn lex_unexpected_char_error() {
+        let mut lexer = Lexer::new("@");
+        assert!(lexer.next_token().is_err());
+    }
+
+    #[test]
+    fn lex_whitespace_skipped() {
+        let mut lexer = Lexer::new("   42   ");
+        assert!(matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - 42.0).abs() < f64::EPSILON));
+        assert!(matches!(lexer.next_token().unwrap(), Token::Eof));
+    }
+
+    // --- Parser / Filter::parse tests ---
+
+    #[test]
+    fn parse_empty_expression() {
+        assert!(Filter::parse("").is_err());
+    }
+
+    #[test]
+    fn parse_whitespace_only() {
+        assert!(Filter::parse("   ").is_err());
+    }
+
+    #[test]
+    fn parse_simple_num_comparison() {
+        assert!(Filter::parse("duration_ms > 60000").is_ok());
+    }
+
+    #[test]
+    fn parse_simple_str_comparison() {
+        assert!(Filter::parse("media.audio.codec.name == \"aac\"").is_ok());
+    }
+
+    #[test]
+    fn parse_and_expression() {
+        assert!(Filter::parse("duration_ms > 60000 && fs.size_bytes < 5000000").is_ok());
+    }
+
+    #[test]
+    fn parse_or_expression() {
+        assert!(Filter::parse("extension == \"mp4\" || extension == \"mkv\"").is_ok());
+    }
+
+    #[test]
+    fn parse_not_expression() {
+        assert!(Filter::parse("!extension == \"avi\"").is_ok());
+    }
+
+    #[test]
+    fn parse_nested_parens() {
+        assert!(Filter::parse(
+            "(duration_ms > 60000 || fs.size_bytes > 1000) && extension == \"mp4\""
+        ).is_ok());
+    }
+
+    #[test]
+    fn parse_deeply_nested() {
+        assert!(Filter::parse("((a > 1))").is_ok());
+    }
+
+    #[test]
+    fn parse_missing_rparen_error() {
+        assert!(Filter::parse("(duration_ms > 60000").is_err());
+    }
+
+    #[test]
+    fn parse_missing_operator_error() {
+        assert!(Filter::parse("field 42").is_err());
+    }
+
+    #[test]
+    fn parse_missing_value_error() {
+        assert!(Filter::parse("field ==").is_err());
+    }
+
+    // --- Evaluation tests ---
+
+    #[test]
+    fn eval_numeric_gt_true() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms > 60000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_numeric_gt_false() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms > 200000").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_numeric_eq() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms == 120000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_numeric_ne() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms != 60000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_numeric_ge() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms >= 120000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_numeric_lt() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms < 200000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_numeric_le() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms <= 120000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_string_eq() {
+        let entry = make_entry();
+        let f = Filter::parse("extension == \"mp4\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_string_ne() {
+        let entry = make_entry();
+        let f = Filter::parse("extension != \"avi\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_nested_field_path() {
+        let entry = make_entry();
+        let f = Filter::parse("media.video.width >= 1920").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_deep_nested_codec() {
+        let entry = make_entry();
+        let f = Filter::parse("media.video.codec.name == \"h264\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_and_both_true() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms > 60000 && extension == \"mp4\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_and_one_false() {
+        let entry = make_entry();
+        let f = Filter::parse("media.duration_ms > 60000 && extension == \"avi\"").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_or_one_true() {
+        let entry = make_entry();
+        let f = Filter::parse("extension == \"avi\" || extension == \"mp4\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_or_both_false() {
+        let entry = make_entry();
+        let f = Filter::parse("extension == \"avi\" || extension == \"wmv\"").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_not_negates() {
+        let entry = make_entry();
+        let f = Filter::parse("!extension == \"avi\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_not_true_becomes_false() {
+        let entry = make_entry();
+        let f = Filter::parse("!extension == \"mp4\"").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_missing_field_returns_false() {
+        let entry = make_entry();
+        let f = Filter::parse("nonexistent.field == \"x\"").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_complex_expression() {
+        let entry = make_entry();
+        let f = Filter::parse(
+            "(media.video.width >= 1920 || media.video.height >= 1080) && media.duration_ms > 60000"
+        ).unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_bare_ident_as_string() {
+        let entry = make_entry();
+        // Bare identifier "av" should be treated as string
+        let f = Filter::parse("media.kind == av").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+}

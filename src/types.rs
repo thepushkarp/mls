@@ -373,3 +373,294 @@ pub fn is_media_extension(ext: &str) -> bool {
 pub fn is_video_extension(ext: &str) -> bool {
     VIDEO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- format_duration ---
+
+    #[test]
+    fn format_duration_zero() {
+        assert_eq!(format_duration(0), "0:00");
+    }
+
+    #[test]
+    fn format_duration_seconds_only() {
+        assert_eq!(format_duration(45_000), "0:45");
+    }
+
+    #[test]
+    fn format_duration_minutes_and_seconds() {
+        assert_eq!(format_duration(90_000), "1:30");
+    }
+
+    #[test]
+    fn format_duration_exact_minute() {
+        assert_eq!(format_duration(60_000), "1:00");
+    }
+
+    #[test]
+    fn format_duration_hours() {
+        assert_eq!(format_duration(3_661_000), "1:01:01");
+    }
+
+    #[test]
+    fn format_duration_exact_hour() {
+        assert_eq!(format_duration(3_600_000), "1:00:00");
+    }
+
+    #[test]
+    fn format_duration_sub_second_truncated() {
+        // 999ms should still show 0:00 (truncates, not rounds)
+        assert_eq!(format_duration(999), "0:00");
+    }
+
+    // --- format_size ---
+
+    #[test]
+    fn format_size_bytes() {
+        assert_eq!(format_size(500), "500 B");
+    }
+
+    #[test]
+    fn format_size_zero_bytes() {
+        assert_eq!(format_size(0), "0 B");
+    }
+
+    #[test]
+    fn format_size_kilobytes() {
+        assert_eq!(format_size(2048), "2 KB");
+    }
+
+    #[test]
+    fn format_size_megabytes() {
+        assert_eq!(format_size(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    #[test]
+    fn format_size_gigabytes() {
+        assert_eq!(format_size(2 * 1024 * 1024 * 1024), "2.0 GB");
+    }
+
+    #[test]
+    fn format_size_boundary_kb() {
+        assert_eq!(format_size(1024), "1 KB");
+    }
+
+    // --- format_bitrate ---
+
+    #[test]
+    fn format_bitrate_bps() {
+        assert_eq!(format_bitrate(500), "500 bps");
+    }
+
+    #[test]
+    fn format_bitrate_kbps() {
+        assert_eq!(format_bitrate(128_000), "128 kbps");
+    }
+
+    #[test]
+    fn format_bitrate_mbps() {
+        assert_eq!(format_bitrate(5_000_000), "5.0 Mbps");
+    }
+
+    #[test]
+    fn format_bitrate_boundary_kbps() {
+        assert_eq!(format_bitrate(1000), "1 kbps");
+    }
+
+    // --- Fps ---
+
+    #[test]
+    fn fps_as_f64_normal() {
+        let fps = Fps { num: 24000, den: 1001 };
+        let val = fps.as_f64();
+        assert!((val - 23.976).abs() < 0.01);
+    }
+
+    #[test]
+    fn fps_as_f64_integer() {
+        let fps = Fps { num: 30, den: 1 };
+        assert!((fps.as_f64() - 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn fps_as_f64_zero_den() {
+        let fps = Fps { num: 24, den: 0 };
+        assert!(fps.as_f64().abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn fps_display_integer() {
+        let fps = Fps { num: 30, den: 1 };
+        assert_eq!(fps.to_string(), "30");
+    }
+
+    #[test]
+    fn fps_display_fractional() {
+        let fps = Fps { num: 24000, den: 1001 };
+        assert_eq!(fps.to_string(), "23.976");
+    }
+
+    #[test]
+    fn fps_display_60() {
+        let fps = Fps { num: 60, den: 1 };
+        assert_eq!(fps.to_string(), "60");
+    }
+
+    // --- VideoInfo::resolution_label ---
+
+    #[test]
+    fn resolution_label_480p() {
+        let v = VideoInfo {
+            width: 640,
+            height: 480,
+            fps: None,
+            bitrate_bps: None,
+            codec: CodecInfo::default(),
+            pixel_format: None,
+        };
+        assert_eq!(v.resolution_label(), "480p");
+    }
+
+    #[test]
+    fn resolution_label_720p() {
+        let v = VideoInfo {
+            width: 1280,
+            height: 720,
+            fps: None,
+            bitrate_bps: None,
+            codec: CodecInfo::default(),
+            pixel_format: None,
+        };
+        assert_eq!(v.resolution_label(), "720p");
+    }
+
+    #[test]
+    fn resolution_label_1080p() {
+        let v = VideoInfo {
+            width: 1920,
+            height: 1080,
+            fps: None,
+            bitrate_bps: None,
+            codec: CodecInfo::default(),
+            pixel_format: None,
+        };
+        assert_eq!(v.resolution_label(), "1080p");
+    }
+
+    #[test]
+    fn resolution_label_1440p() {
+        let v = VideoInfo {
+            width: 2560,
+            height: 1440,
+            fps: None,
+            bitrate_bps: None,
+            codec: CodecInfo::default(),
+            pixel_format: None,
+        };
+        assert_eq!(v.resolution_label(), "1440p");
+    }
+
+    #[test]
+    fn resolution_label_4k() {
+        let v = VideoInfo {
+            width: 3840,
+            height: 2160,
+            fps: None,
+            bitrate_bps: None,
+            codec: CodecInfo::default(),
+            pixel_format: None,
+        };
+        assert_eq!(v.resolution_label(), "4K");
+    }
+
+    // --- SortKey ---
+
+    #[test]
+    fn sort_key_labels() {
+        assert_eq!(SortKey::Path.label(), "path");
+        assert_eq!(SortKey::Name.label(), "name");
+        assert_eq!(SortKey::Size.label(), "size");
+        assert_eq!(SortKey::Modified.label(), "date");
+        assert_eq!(SortKey::Duration.label(), "duration");
+        assert_eq!(SortKey::Resolution.label(), "resolution");
+        assert_eq!(SortKey::Codec.label(), "codec");
+        assert_eq!(SortKey::Bitrate.label(), "bitrate");
+    }
+
+    #[test]
+    fn sort_key_cycle_returns_to_start() {
+        let start = SortKey::Path;
+        let mut current = start;
+        for _ in 0..8 {
+            current = current.next();
+        }
+        assert_eq!(current, start);
+    }
+
+    #[test]
+    fn sort_key_next_sequence() {
+        assert_eq!(SortKey::Path.next(), SortKey::Name);
+        assert_eq!(SortKey::Bitrate.next(), SortKey::Path);
+    }
+
+    // --- SortDir ---
+
+    #[test]
+    fn sort_dir_toggle() {
+        assert_eq!(SortDir::Asc.toggle(), SortDir::Desc);
+        assert_eq!(SortDir::Desc.toggle(), SortDir::Asc);
+    }
+
+    // --- MediaKind Display ---
+
+    #[test]
+    fn media_kind_display() {
+        assert_eq!(MediaKind::Video.to_string(), "video");
+        assert_eq!(MediaKind::Audio.to_string(), "audio");
+        assert_eq!(MediaKind::Av.to_string(), "av");
+    }
+
+    // --- Extension checks ---
+
+    #[test]
+    fn is_media_extension_video() {
+        assert!(is_media_extension("mp4"));
+        assert!(is_media_extension("mkv"));
+        assert!(is_media_extension("webm"));
+    }
+
+    #[test]
+    fn is_media_extension_audio() {
+        assert!(is_media_extension("mp3"));
+        assert!(is_media_extension("flac"));
+        assert!(is_media_extension("opus"));
+    }
+
+    #[test]
+    fn is_media_extension_case_insensitive() {
+        assert!(is_media_extension("MP4"));
+        assert!(is_media_extension("Flac"));
+    }
+
+    #[test]
+    fn is_media_extension_rejects_unknown() {
+        assert!(!is_media_extension("txt"));
+        assert!(!is_media_extension("pdf"));
+        assert!(!is_media_extension(""));
+    }
+
+    #[test]
+    fn is_video_extension_accepts_video() {
+        assert!(is_video_extension("mkv"));
+        assert!(is_video_extension("mov"));
+    }
+
+    #[test]
+    fn is_video_extension_rejects_audio() {
+        assert!(!is_video_extension("mp3"));
+        assert!(!is_video_extension("flac"));
+    }
+}
