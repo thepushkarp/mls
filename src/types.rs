@@ -189,20 +189,6 @@ pub struct MediaEntry {
     pub probe: ProbeInfo,
 }
 
-/// JSON envelope for `mls list --json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ListEnvelope {
-    #[serde(rename = "type")]
-    pub doc_type: String,
-    pub schema_version: String,
-    pub mls_version: String,
-    pub generated_at: DateTime<Utc>,
-    pub summary: ListSummary,
-    pub entries: Vec<MediaEntry>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub errors: Vec<ProbeError>,
-}
-
 /// Summary statistics for a list operation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSummary {

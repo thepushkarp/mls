@@ -5,6 +5,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 
@@ -16,12 +17,19 @@ pub enum PlaybackState {
     Paused,
 }
 
+/// Persistent IPC connection to mpv.
+struct IpcConn {
+    writer: OwnedWriteHalf,
+    reader: BufReader<OwnedReadHalf>,
+}
+
 /// Controller for an mpv subprocess.
 pub struct MpvController {
     socket_path: PathBuf,
     child: Option<Child>,
     state: PlaybackState,
     current_file: Option<PathBuf>,
+    conn: Option<IpcConn>,
 }
 
 impl MpvController {
@@ -37,6 +45,7 @@ impl MpvController {
             child: None,
             state: PlaybackState::Stopped,
             current_file: None,
+            conn: None,
         }
     }
 
@@ -121,7 +130,7 @@ impl MpvController {
     /// # Errors
     /// Returns an error if the IPC query fails.
     #[expect(dead_code, reason = "will be used for playback progress display")]
-    pub async fn get_position(&self) -> Result<f64> {
+    pub async fn get_position(&mut self) -> Result<f64> {
         let resp = self
             .send_command_with_response(
                 r#"{"command": ["get_property", "time-pos"]}"#,
@@ -137,6 +146,7 @@ impl MpvController {
 
     /// Stop playback and kill mpv process.
     pub async fn stop(&mut self) {
+        self.conn = None;
         if let Some(ref mut child) = self.child {
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -156,30 +166,52 @@ impl MpvController {
         }
     }
 
-    async fn send_command(&self, cmd: &str) -> Result<()> {
+    async fn send_command(&mut self, cmd: &str) -> Result<()> {
         self.send_command_with_response(cmd).await?;
         Ok(())
     }
 
-    async fn send_command_with_response(&self, cmd: &str) -> Result<String> {
-        let mut stream = UnixStream::connect(&self.socket_path)
-            .await
-            .context("failed to connect to mpv IPC socket")?;
+    async fn send_command_with_response(
+        &mut self,
+        cmd: &str,
+    ) -> Result<String> {
+        if let Ok(resp) = self.try_ipc_command(cmd).await {
+            Ok(resp)
+        } else {
+            self.conn = None;
+            self.try_ipc_command(cmd).await
+        }
+    }
 
-        stream
+    async fn try_ipc_command(&mut self, cmd: &str) -> Result<String> {
+        let conn = self.ensure_conn().await?;
+        conn.writer
             .write_all(cmd.as_bytes())
             .await
             .context("failed to write to mpv IPC")?;
-        stream.write_all(b"\n").await?;
-
-        let mut reader = BufReader::new(stream);
+        conn.writer.write_all(b"\n").await?;
         let mut line = String::new();
-        reader
+        conn.reader
             .read_line(&mut line)
             .await
             .context("failed to read mpv response")?;
-
         Ok(line)
+    }
+
+    async fn ensure_conn(&mut self) -> Result<&mut IpcConn> {
+        if self.conn.is_none() {
+            let stream = UnixStream::connect(&self.socket_path)
+                .await
+                .context("failed to connect to mpv IPC socket")?;
+            let (read, write) = stream.into_split();
+            self.conn = Some(IpcConn {
+                writer: write,
+                reader: BufReader::new(read),
+            });
+        }
+        self.conn
+            .as_mut()
+            .context("IPC connection not established")
     }
 }
 
