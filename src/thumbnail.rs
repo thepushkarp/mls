@@ -147,12 +147,11 @@ async fn generate_thumbnail(path: &Path) -> Result<Vec<u8>> {
 }
 
 fn tempfile_path() -> PathBuf {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!("mls_thumb_{ts}.jpg"))
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let pid = std::process::id();
+    std::env::temp_dir().join(format!("mls_thumb_{pid}_{id}.jpg"))
 }
 
 /// Default thumbnail cache directory.

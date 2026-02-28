@@ -82,24 +82,24 @@ fn has_media_extension(path: &Path) -> bool {
 
 /// Probe all files concurrently, sending results through a channel.
 ///
-/// Uses `concurrency` parallel tasks. Sends results as they complete.
+/// Spawns at most `concurrency` tasks at a time using `JoinSet`,
+/// avoiding unbounded task allocation for large file lists.
 pub async fn probe_files(
     files: Vec<PathBuf>,
     concurrency: usize,
     timeout_ms: u64,
     tx: mpsc::Sender<ScanResult>,
 ) {
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
-    let mut handles = Vec::new();
+    let mut tasks = tokio::task::JoinSet::new();
 
     for file in files {
-        let sem = semaphore.clone();
+        // Wait for a slot if at concurrency limit
+        while tasks.len() >= concurrency {
+            let _ = tasks.join_next().await;
+        }
+
         let tx = tx.clone();
-        let handle = tokio::spawn(async move {
-            let Ok(_permit) = sem.acquire().await else {
-                tracing::error!("semaphore closed unexpectedly");
-                return;
-            };
+        tasks.spawn(async move {
             match probe::probe_file(&file, timeout_ms).await {
                 Ok(entry) => {
                     let _ = tx.send(ScanResult::Entry(Box::new(entry))).await;
@@ -113,12 +113,10 @@ pub async fn probe_files(
                 }
             }
         });
-        handles.push(handle);
     }
 
-    for handle in handles {
-        let _ = handle.await;
-    }
+    // Drain remaining tasks
+    while tasks.join_next().await.is_some() {}
 }
 
 /// Convenience: discover + probe all, collecting into vectors.
