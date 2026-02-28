@@ -87,7 +87,7 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                 triage.history.push(TriageAction::Keep { index: idx });
                 triage.kept += 1;
                 triage.advance();
-                app.selected = triage.current;
+                app.sync_triage_selection();
             }
         }
         KeyCode::Char('n') => {
@@ -109,7 +109,7 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                                 .push(TriageAction::Delete { index: idx, path });
                             triage.deleted += 1;
                             triage.advance();
-                            app.selected = triage.current;
+                            app.sync_triage_selection();
                         }
                         app.status_message = Some("Moved to trash".to_string());
                     }
@@ -137,18 +137,17 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                         if let Some(ref mut triage) = app.triage {
                             triage.kept = triage.kept.saturating_sub(1);
                             triage.current = triage.current.saturating_sub(1);
-                            app.selected = triage.current;
+                            app.sync_triage_selection();
                         }
                         app.status_message = Some("Undid keep".to_string());
                     }
                     TriageAction::Delete { path, .. } => {
-                        if let Some(ref mut triage) = app.triage {
-                            triage.deleted = triage.deleted.saturating_sub(1);
-                            triage.current = triage.current.saturating_sub(1);
-                            app.selected = triage.current;
-                        }
+                        // Delete cannot be undone — file is in macOS system
+                        // Trash. Don't adjust counters or cursor; just inform
+                        // the user. The action is consumed from history so
+                        // subsequent undos operate on prior actions.
                         app.status_message = Some(format!(
-                            "Undid delete (file may be in Trash): {}",
+                            "Cannot undo delete \u{2014} file is in system Trash: {}",
                             path.display()
                         ));
                     }
@@ -158,7 +157,7 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                             if let Some(ref mut triage) = app.triage {
                                 triage.moved = triage.moved.saturating_sub(1);
                                 triage.current = triage.current.saturating_sub(1);
-                                app.selected = triage.current;
+                                app.sync_triage_selection();
                             }
                             app.status_message = Some("Undid move".to_string());
                         } else {
@@ -174,13 +173,13 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
         KeyCode::Right | KeyCode::Char('l') => {
             if let Some(ref mut triage) = app.triage {
                 triage.advance();
-                app.selected = triage.current;
+                app.sync_triage_selection();
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
             if let Some(ref mut triage) = app.triage {
                 triage.current = triage.current.saturating_sub(1);
-                app.selected = triage.current;
+                app.sync_triage_selection();
             }
         }
         // Playback in triage
@@ -198,4 +197,47 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
         }
         _ => {}
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn triage_state_new_initializes_correctly() {
+        let state = TriageState::new(10);
+        assert_eq!(state.current, 0);
+        assert_eq!(state.total, 10);
+        assert_eq!(state.kept, 0);
+        assert_eq!(state.deleted, 0);
+        assert_eq!(state.moved, 0);
+        assert!(state.history.is_empty());
+    }
+
+    #[test]
+    fn triage_advance_increments_within_bounds() {
+        let mut state = TriageState::new(3);
+        state.advance();
+        assert_eq!(state.current, 1);
+        state.advance();
+        assert_eq!(state.current, 2);
+        // Should not advance past total - 1
+        state.advance();
+        assert_eq!(state.current, 2);
+    }
+
+    #[test]
+    fn triage_advance_noop_when_total_zero() {
+        let mut state = TriageState::new(0);
+        state.advance();
+        assert_eq!(state.current, 0);
+    }
+
+    #[test]
+    fn triage_advance_noop_when_total_one() {
+        let mut state = TriageState::new(1);
+        state.advance();
+        assert_eq!(state.current, 0);
+    }
+
 }
