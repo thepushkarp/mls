@@ -7,8 +7,9 @@
 ///   `media.kind == "av" && duration_ms > 300000`
 ///
 /// Operators: `== != > >= < <=` `&& || !` `()`
-/// Field paths are dot-separated and resolved against `MediaEntry` JSON.
+/// Field paths are dot-separated and resolved via typed access on `MediaEntry`.
 use crate::types::MediaEntry;
+use std::borrow::Cow;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -372,77 +373,250 @@ impl Filter {
 
     /// Evaluate the filter against a `MediaEntry`.
     ///
-    /// Serializes the entry to JSON and resolves field paths against it.
+    /// Uses typed field access — no JSON serialization.
     ///
     /// # Errors
     /// Returns a `FilterError` if field resolution or comparison fails.
     pub fn matches(&self, entry: &MediaEntry) -> Result<bool, FilterError> {
-        let json = serde_json::to_value(entry)
-            .map_err(|e| FilterError::Eval(format!("failed to serialize entry: {e}")))?;
-        eval_expr(&self.expr, &json)
+        eval_expr(&self.expr, entry)
     }
 }
 
-fn eval_expr(expr: &Expr, json: &serde_json::Value) -> Result<bool, FilterError> {
+/// Lightweight value type for typed field resolution (avoids `serde_json::Value`).
+enum FieldValue<'a> {
+    Num(f64),
+    Str(Cow<'a, str>),
+    Null,
+}
+
+fn eval_expr(expr: &Expr, entry: &MediaEntry) -> Result<bool, FilterError> {
     match expr {
         Expr::Compare { field, op, value } => {
-            let field_val = resolve_field(json, field);
+            let field_val = resolve_field_typed(entry, field);
             compare_values(&field_val, *op, value)
         }
-        Expr::And(left, right) => Ok(eval_expr(left, json)? && eval_expr(right, json)?),
-        Expr::Or(left, right) => Ok(eval_expr(left, json)? || eval_expr(right, json)?),
-        Expr::Not(inner) => Ok(!eval_expr(inner, json)?),
+        Expr::And(left, right) => Ok(eval_expr(left, entry)? && eval_expr(right, entry)?),
+        Expr::Or(left, right) => Ok(eval_expr(left, entry)? || eval_expr(right, entry)?),
+        Expr::Not(inner) => Ok(!eval_expr(inner, entry)?),
     }
 }
 
-fn resolve_field(json: &serde_json::Value, path: &str) -> serde_json::Value {
-    let mut current = json;
-    for part in path.split('.') {
-        match current.get(part) {
-            Some(v) => current = v,
-            None => return serde_json::Value::Null,
+/// Resolve a dot-separated field path to a typed value via direct struct access.
+///
+/// Covers all `MediaEntry` fields that filters can reference.
+#[expect(clippy::too_many_lines, clippy::cast_precision_loss)]
+fn resolve_field_typed<'a>(entry: &'a MediaEntry, path: &str) -> FieldValue<'a> {
+    match path {
+        // Top-level fields
+        "path" => FieldValue::Str(Cow::Borrowed(entry.path.to_str().unwrap_or(""))),
+        "file_name" => FieldValue::Str(Cow::Borrowed(&entry.file_name)),
+        "extension" => FieldValue::Str(Cow::Borrowed(&entry.extension)),
+
+        // fs.*
+        "fs.size_bytes" => FieldValue::Num(entry.fs.size_bytes as f64),
+        "fs.modified_at" => match entry.fs.modified_at {
+            Some(dt) => FieldValue::Str(Cow::Owned(dt.to_rfc3339())),
+            None => FieldValue::Null,
+        },
+        "fs.created_at" => match entry.fs.created_at {
+            Some(dt) => FieldValue::Str(Cow::Owned(dt.to_rfc3339())),
+            None => FieldValue::Null,
+        },
+
+        // media.*
+        "media.kind" => FieldValue::Str(Cow::Owned(entry.media.kind.to_string())),
+        "media.duration_ms" => match entry.media.duration_ms {
+            Some(d) => FieldValue::Num(d as f64),
+            None => FieldValue::Null,
+        },
+        "media.overall_bitrate_bps" => match entry.media.overall_bitrate_bps {
+            Some(b) => FieldValue::Num(b as f64),
+            None => FieldValue::Null,
+        },
+
+        // media.container.*
+        "media.container.format_name" => {
+            FieldValue::Str(Cow::Borrowed(&entry.media.container.format_name))
         }
+        "media.container.format_primary" => {
+            FieldValue::Str(Cow::Borrowed(&entry.media.container.format_primary))
+        }
+
+        // media.video.*
+        "media.video.width" => match entry.media.video {
+            Some(ref v) => FieldValue::Num(f64::from(v.width)),
+            None => FieldValue::Null,
+        },
+        "media.video.height" => match entry.media.video {
+            Some(ref v) => FieldValue::Num(f64::from(v.height)),
+            None => FieldValue::Null,
+        },
+        "media.video.bitrate_bps" => match entry.media.video {
+            Some(ref v) => match v.bitrate_bps {
+                Some(b) => FieldValue::Num(b as f64),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.video.pixel_format" => match entry.media.video {
+            Some(ref v) => match v.pixel_format {
+                Some(ref pf) => FieldValue::Str(Cow::Borrowed(pf)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.video.codec.name" => match entry.media.video {
+            Some(ref v) => FieldValue::Str(Cow::Borrowed(&v.codec.name)),
+            None => FieldValue::Null,
+        },
+        "media.video.codec.profile" => match entry.media.video {
+            Some(ref v) => match v.codec.profile {
+                Some(ref p) => FieldValue::Str(Cow::Borrowed(p)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.video.codec.level" => match entry.media.video {
+            Some(ref v) => match v.codec.level {
+                Some(ref l) => FieldValue::Str(Cow::Borrowed(l)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.video.fps.num" => match entry.media.video {
+            Some(ref v) => match v.fps {
+                Some(fps) => FieldValue::Num(f64::from(fps.num)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.video.fps.den" => match entry.media.video {
+            Some(ref v) => match v.fps {
+                Some(fps) => FieldValue::Num(f64::from(fps.den)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+
+        // media.audio.*
+        "media.audio.channels" => match entry.media.audio {
+            Some(ref a) => FieldValue::Num(f64::from(a.channels)),
+            None => FieldValue::Null,
+        },
+        "media.audio.channel_layout" => match entry.media.audio {
+            Some(ref a) => match a.channel_layout {
+                Some(ref cl) => FieldValue::Str(Cow::Borrowed(cl)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.audio.sample_rate_hz" => match entry.media.audio {
+            Some(ref a) => match a.sample_rate_hz {
+                Some(sr) => FieldValue::Num(f64::from(sr)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.audio.bitrate_bps" => match entry.media.audio {
+            Some(ref a) => match a.bitrate_bps {
+                Some(b) => FieldValue::Num(b as f64),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+        "media.audio.codec.name" => match entry.media.audio {
+            Some(ref a) => FieldValue::Str(Cow::Borrowed(&a.codec.name)),
+            None => FieldValue::Null,
+        },
+        "media.audio.codec.profile" => match entry.media.audio {
+            Some(ref a) => match a.codec.profile {
+                Some(ref p) => FieldValue::Str(Cow::Borrowed(p)),
+                None => FieldValue::Null,
+            },
+            None => FieldValue::Null,
+        },
+
+        // media.tags.*
+        "media.tags.title" => match entry.media.tags.title {
+            Some(ref t) => FieldValue::Str(Cow::Borrowed(t)),
+            None => FieldValue::Null,
+        },
+        "media.tags.artist" => match entry.media.tags.artist {
+            Some(ref a) => FieldValue::Str(Cow::Borrowed(a)),
+            None => FieldValue::Null,
+        },
+        "media.tags.album" => match entry.media.tags.album {
+            Some(ref a) => FieldValue::Str(Cow::Borrowed(a)),
+            None => FieldValue::Null,
+        },
+        "media.tags.date" => match entry.media.tags.date {
+            Some(ref d) => FieldValue::Str(Cow::Borrowed(d)),
+            None => FieldValue::Null,
+        },
+        "media.tags.genre" => match entry.media.tags.genre {
+            Some(ref g) => FieldValue::Str(Cow::Borrowed(g)),
+            None => FieldValue::Null,
+        },
+
+        // probe.*
+        "probe.backend" => FieldValue::Str(Cow::Borrowed(&entry.probe.backend)),
+        "probe.took_ms" => FieldValue::Num(entry.probe.took_ms as f64),
+
+        // Unknown field
+        _ => FieldValue::Null,
     }
-    current.clone()
 }
 
-fn compare_values(
-    field: &serde_json::Value,
-    op: CmpOp,
-    value: &Value,
-) -> Result<bool, FilterError> {
-    if field.is_null() {
+fn compare_values(field: &FieldValue<'_>, op: CmpOp, value: &Value) -> Result<bool, FilterError> {
+    if matches!(field, FieldValue::Null) {
         return Ok(false);
     }
 
-    match value {
-        Value::Num(n) => {
-            let field_num = field
-                .as_f64()
-                .ok_or_else(|| FilterError::Eval(format!("field value is not numeric: {field}")))?;
-            Ok(match op {
-                CmpOp::Eq => (field_num - n).abs() < f64::EPSILON,
-                CmpOp::Ne => (field_num - n).abs() >= f64::EPSILON,
-                CmpOp::Gt => field_num > *n,
-                CmpOp::Ge => field_num >= *n,
-                CmpOp::Lt => field_num < *n,
-                CmpOp::Le => field_num <= *n,
-            })
-        }
-        Value::Str(s) => {
-            let field_str = field.as_str().map_or_else(
-                || field.to_string().trim_matches('"').to_string(),
-                String::from,
-            );
+    match (field, value) {
+        (FieldValue::Num(field_num), Value::Num(n)) => Ok(match op {
+            CmpOp::Eq => (field_num - n).abs() < f64::EPSILON,
+            CmpOp::Ne => (field_num - n).abs() >= f64::EPSILON,
+            CmpOp::Gt => *field_num > *n,
+            CmpOp::Ge => *field_num >= *n,
+            CmpOp::Lt => *field_num < *n,
+            CmpOp::Le => *field_num <= *n,
+        }),
+        (FieldValue::Str(field_str), Value::Str(s)) => Ok(match op {
+            CmpOp::Eq => field_str.as_ref() == s,
+            CmpOp::Ne => field_str.as_ref() != s,
+            CmpOp::Gt => field_str.as_ref() > s.as_str(),
+            CmpOp::Ge => field_str.as_ref() >= s.as_str(),
+            CmpOp::Lt => field_str.as_ref() < s.as_str(),
+            CmpOp::Le => field_str.as_ref() <= s.as_str(),
+        }),
+        (FieldValue::Num(n), Value::Str(s)) => {
+            let field_str = n.to_string();
             Ok(match op {
                 CmpOp::Eq => field_str == *s,
                 CmpOp::Ne => field_str != *s,
                 CmpOp::Gt => field_str.as_str() > s.as_str(),
                 CmpOp::Ge => field_str.as_str() >= s.as_str(),
-                CmpOp::Lt => (field_str.as_str()) < s.as_str(),
+                CmpOp::Lt => field_str.as_str() < s.as_str(),
                 CmpOp::Le => field_str.as_str() <= s.as_str(),
             })
         }
+        (FieldValue::Str(field_str), Value::Num(n)) => {
+            if let Ok(field_num) = field_str.parse::<f64>() {
+                Ok(match op {
+                    CmpOp::Eq => (field_num - n).abs() < f64::EPSILON,
+                    CmpOp::Ne => (field_num - n).abs() >= f64::EPSILON,
+                    CmpOp::Gt => field_num > *n,
+                    CmpOp::Ge => field_num >= *n,
+                    CmpOp::Lt => field_num < *n,
+                    CmpOp::Le => field_num <= *n,
+                })
+            } else {
+                Err(FilterError::Eval(format!(
+                    "cannot compare string '{field_str}' with number",
+                )))
+            }
+        }
+        (FieldValue::Null, _) => Ok(false),
     }
 }
 
@@ -454,6 +628,7 @@ mod tests {
         AudioInfo, CodecInfo, ContainerInfo, Fps, FsInfo, MediaEntry, MediaInfo, MediaKind,
         MediaTags, ProbeInfo, VideoInfo,
     };
+    use std::borrow::Cow;
     use std::path::PathBuf;
 
     fn make_entry() -> MediaEntry {
@@ -501,7 +676,7 @@ mod tests {
                 tags: MediaTags::default(),
             },
             probe: ProbeInfo {
-                backend: "ffprobe".to_string(),
+                backend: Cow::Borrowed("ffprobe"),
                 took_ms: 50,
                 error: None,
             },

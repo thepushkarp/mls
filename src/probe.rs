@@ -7,6 +7,7 @@ use crate::types::{
     ProbeInfo, StreamInfo, VideoInfo,
 };
 use anyhow::{Context, Result};
+use std::borrow::Cow;
 use std::path::Path;
 use std::time::Instant;
 use tokio::process::Command;
@@ -85,7 +86,9 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
     let raw: FfprobeOutput =
         serde_json::from_slice(&output.stdout).context("failed to parse ffprobe JSON")?;
 
-    let fs_meta = std::fs::metadata(path).context("failed to read file metadata")?;
+    let fs_meta = tokio::fs::metadata(path)
+        .await
+        .context("failed to read file metadata")?;
     let fs = build_fs_info(&fs_meta);
     let media = build_media_info(&raw);
     let file_name = path
@@ -102,7 +105,7 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
         fs,
         media,
         probe: ProbeInfo {
-            backend: "ffprobe".to_string(),
+            backend: Cow::Borrowed("ffprobe"),
             took_ms,
             error: None,
         },

@@ -4,6 +4,7 @@
 /// Field naming follows the schema from the PRD (e.g., `duration_ms`, `bitrate_bps`).
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 /// Top-level media kind classification.
@@ -172,7 +173,7 @@ pub struct FsInfo {
 /// Probe execution metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeInfo {
-    pub backend: String,
+    pub backend: Cow<'static, str>,
     pub took_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -349,14 +350,18 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
 /// Check if a file extension is a recognized media type.
 #[must_use]
 pub fn is_media_extension(ext: &str) -> bool {
-    let ext_lower = ext.to_ascii_lowercase();
-    VIDEO_EXTENSIONS.contains(&ext_lower.as_str()) || AUDIO_EXTENSIONS.contains(&ext_lower.as_str())
+    VIDEO_EXTENSIONS
+        .iter()
+        .chain(AUDIO_EXTENSIONS.iter())
+        .any(|known| ext.eq_ignore_ascii_case(known))
 }
 
 /// Check if a file extension is a recognized video type.
 #[must_use]
 pub fn is_video_extension(ext: &str) -> bool {
-    VIDEO_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
+    VIDEO_EXTENSIONS
+        .iter()
+        .any(|known| ext.eq_ignore_ascii_case(known))
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ use crate::probe;
 use crate::types::{MediaEntry, ProbeError, is_media_extension};
 use anyhow::Result;
 use std::collections::HashSet;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
@@ -19,7 +20,7 @@ pub enum ScanResult {
 /// Walk directories and collect media file paths (no probing yet).
 pub fn discover_media_files(paths: &[PathBuf], max_depth: Option<usize>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    let mut visited = HashSet::new();
+    let mut visited: HashSet<DirId> = HashSet::new();
     for path in paths {
         if path.is_file() {
             if has_media_extension(path) {
@@ -38,21 +39,26 @@ pub fn discover_media_files(paths: &[PathBuf], max_depth: Option<usize>) -> Vec<
     files
 }
 
+/// Visited set key: (device, inode) avoids costly `canonicalize()` syscall.
+type DirId = (u64, u64);
+
 fn walk_dir(
     dir: &Path,
     max_depth: usize,
     current_depth: usize,
     out: &mut Vec<PathBuf>,
-    visited: &mut HashSet<PathBuf>,
+    visited: &mut HashSet<DirId>,
 ) {
     if current_depth > max_depth {
         return;
     }
 
-    let Ok(canonical) = dir.canonicalize() else {
+    // Use device+inode for cycle detection (avoids realpath syscall)
+    let Ok(meta) = std::fs::metadata(dir) else {
         return;
     };
-    if !visited.insert(canonical) {
+    let dir_id = (meta.dev(), meta.ino());
+    if !visited.insert(dir_id) {
         tracing::debug!("skipping already-visited directory: {}", dir.display());
         return;
     }
@@ -62,9 +68,20 @@ fn walk_dir(
     };
 
     for entry in entries.flatten() {
+        // Use entry.file_type() (from readdir d_type) to avoid extra stat syscall
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
         let path = entry.path();
-        if path.is_dir() {
-            walk_dir(&path, max_depth, current_depth + 1, out, visited);
+        if ft.is_dir() || ft.is_symlink() {
+            // For symlinks, verify the target is a directory via metadata (follows symlinks)
+            if ft.is_symlink() {
+                if std::fs::metadata(&path).is_ok_and(|m| m.is_dir()) {
+                    walk_dir(&path, max_depth, current_depth + 1, out, visited);
+                }
+            } else {
+                walk_dir(&path, max_depth, current_depth + 1, out, visited);
+            }
         } else if has_media_extension(&path) {
             out.push(path);
         }

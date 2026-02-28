@@ -277,6 +277,7 @@ mod tests {
     use super::*;
     use crate::thumbnail::ThumbnailCache;
     use crate::types::{ContainerInfo, FsInfo, MediaInfo, MediaKind, MediaTags, ProbeInfo};
+    use std::borrow::Cow;
 
     fn make_entry(path: PathBuf) -> crate::types::MediaEntry {
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
@@ -308,7 +309,7 @@ mod tests {
                 tags: MediaTags::default(),
             },
             probe: ProbeInfo {
-                backend: "ffprobe".to_string(),
+                backend: Cow::Borrowed("ffprobe"),
                 took_ms: 10,
                 error: None,
             },

@@ -195,12 +195,22 @@ impl MpvController {
             .await
             .context("failed to write to mpv IPC")?;
         conn.writer.write_all(b"\n").await?;
-        let mut line = String::new();
-        conn.reader
-            .read_line(&mut line)
-            .await
-            .context("failed to read mpv response")?;
-        Ok(line)
+
+        // Read lines, skipping async event objects (contain "event" key but no "error" key).
+        // mpv interleaves these with command responses.
+        for _ in 0..10 {
+            let mut line = String::new();
+            conn.reader
+                .read_line(&mut line)
+                .await
+                .context("failed to read mpv response")?;
+            // Command responses contain "error" key; async events contain "event" key
+            if line.contains("\"error\"") || !line.contains("\"event\"") {
+                return Ok(line);
+            }
+            // Otherwise it's an async event — skip and read next line
+        }
+        anyhow::bail!("too many mpv async events before command response")
     }
 
     async fn ensure_conn(&mut self) -> Result<&mut IpcConn> {

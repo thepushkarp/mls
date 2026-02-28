@@ -640,7 +640,7 @@ async fn event_loop(
             }
         }
 
-        // Update mpv state
+        // Update mpv state — detect process exit
         if app.mpv.state() != PlaybackState::Stopped && !app.mpv.is_alive() {
             app.mpv.stop().await;
             app.playback_position = None;
@@ -648,7 +648,7 @@ async fn event_loop(
             app.playback_file_name = None;
         }
 
-        // Poll playback position when playing
+        // Poll playback position only while actively playing (not paused/stopped)
         if app.mpv.state() == PlaybackState::Playing {
             if let Ok(pos) = app.mpv.get_position().await {
                 app.playback_position = Some(pos);
@@ -658,13 +658,6 @@ async fn event_loop(
             {
                 app.playback_duration = Some(dur);
             }
-        }
-
-        // Clear playback info when stopped
-        if app.mpv.state() == PlaybackState::Stopped {
-            app.playback_position = None;
-            app.playback_duration = None;
-            app.playback_file_name = None;
         }
 
         // Poll for completed thumbnail generation
@@ -911,6 +904,7 @@ fn open_file(path: &std::path::Path) -> Result<()> {
 mod tests {
     use super::*;
     use crate::types::{ContainerInfo, FsInfo, MediaInfo, MediaKind, MediaTags, ProbeInfo};
+    use std::borrow::Cow;
 
     fn make_entry(name: &str) -> MediaEntry {
         MediaEntry {
@@ -936,7 +930,7 @@ mod tests {
                 tags: MediaTags::default(),
             },
             probe: ProbeInfo {
-                backend: "ffprobe".to_string(),
+                backend: Cow::Borrowed("ffprobe"),
                 took_ms: 10,
                 error: None,
             },

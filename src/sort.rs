@@ -9,8 +9,10 @@ use crate::types::{MediaEntry, SortDir, SortKey};
 /// Returns `None` if the sort key is not recognized.
 #[must_use]
 pub fn parse_sort_spec(spec: &str) -> Option<(SortKey, SortDir)> {
-    let parts: Vec<&str> = spec.split(':').collect();
-    let key = match parts[0] {
+    let (key_str, dir_str) = spec
+        .split_once(':')
+        .map_or((spec, None), |(k, d)| (k, Some(d)));
+    let key = match key_str {
         "path" => SortKey::Path,
         "name" => SortKey::Name,
         "size" => SortKey::Size,
@@ -21,15 +23,24 @@ pub fn parse_sort_spec(spec: &str) -> Option<(SortKey, SortDir)> {
         "bitrate" => SortKey::Bitrate,
         _ => return None,
     };
-    let dir = match parts.get(1) {
-        Some(&"desc") => SortDir::Desc,
-        _ => SortDir::Asc,
+    let dir = if dir_str == Some("desc") {
+        SortDir::Desc
+    } else {
+        SortDir::Asc
     };
     Some((key, dir))
 }
 
 /// Sort entries in place by the given key and direction.
 pub fn sort_entries(entries: &mut [MediaEntry], key: SortKey, dir: SortDir) {
+    if key == SortKey::Name {
+        // Cache lowercased keys: one allocation per entry instead of two per comparison
+        entries.sort_by_cached_key(|e| e.file_name.to_lowercase());
+        if dir == SortDir::Desc {
+            entries.reverse();
+        }
+        return;
+    }
     entries.sort_by(|a, b| {
         let cmp = compare_by_key(a, b, key);
         match dir {
@@ -91,6 +102,7 @@ mod tests {
         AudioInfo, CodecInfo, ContainerInfo, FsInfo, MediaInfo, MediaKind, MediaTags, ProbeInfo,
         VideoInfo,
     };
+    use std::borrow::Cow;
     use std::path::PathBuf;
 
     fn make_entry_with(name: &str, size: u64, duration_ms: Option<u64>) -> MediaEntry {
@@ -117,7 +129,7 @@ mod tests {
                 tags: MediaTags::default(),
             },
             probe: ProbeInfo {
-                backend: "ffprobe".to_string(),
+                backend: Cow::Borrowed("ffprobe"),
                 took_ms: 10,
                 error: None,
             },

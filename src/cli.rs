@@ -54,7 +54,7 @@ pub struct Cli {
     pub max_depth: Option<usize>,
 
     /// Metadata probe concurrency.
-    #[arg(long, global = true, default_value = "4")]
+    #[arg(long, global = true, default_value = "16")]
     pub threads: usize,
 
     /// Per-file probe timeout in milliseconds.

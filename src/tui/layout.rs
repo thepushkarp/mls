@@ -9,6 +9,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use std::borrow::Cow;
 
 /// Main render function — lays out all panes.
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -259,7 +260,10 @@ fn render_preview_pane(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let Some(entry) = app.selected_entry().cloned() else {
+    let has_video = app
+        .selected_entry()
+        .is_some_and(|e| e.media.video.is_some());
+    if app.selected_entry().is_none() {
         let msg = if app.dir_scanning {
             "Scanning..."
         } else {
@@ -268,10 +272,9 @@ fn render_preview_pane(frame: &mut Frame, app: &mut App, area: Rect) {
         let empty = Paragraph::new(msg).block(block);
         frame.render_widget(empty, area);
         return;
-    };
+    }
 
     // Split preview pane: thumbnail on top, metadata below
-    let has_video = entry.media.video.is_some();
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -284,10 +287,13 @@ fn render_preview_pane(frame: &mut Frame, app: &mut App, area: Rect) {
             ])
             .split(inner);
 
-        super::preview::render_thumbnail(frame, app, split[0]);
-        render_metadata_text(frame, &entry, split[1]);
-    } else {
-        render_metadata_text(frame, &entry, inner);
+        // Borrow thumb_state mutably, then re-borrow entry immutably
+        super::preview::render_thumbnail(frame, &mut app.thumb_state, split[0]);
+        if let Some(entry) = app.selected_entry() {
+            render_metadata_text(frame, entry, split[1]);
+        }
+    } else if let Some(entry) = app.selected_entry() {
+        render_metadata_text(frame, entry, inner);
     }
 }
 
@@ -690,10 +696,8 @@ fn render_filter_input(frame: &mut Frame, app: &App, pane_area: Rect) {
     let mode_indicator = match app.filter_mode {
         super::FilterMode::Fuzzy => Span::styled("[~] ", Style::default().fg(Color::Cyan)),
         super::FilterMode::Structured => {
-            // Show red if current text doesn't parse
-            let color = if app.filter_text.is_empty()
-                || crate::filter::Filter::parse(&app.filter_text).is_ok()
-            {
+            // Show red if current text doesn't parse (use cached parse result)
+            let color = if app.filter_text.is_empty() || app.filter_expr.is_some() {
                 Color::Green
             } else {
                 Color::Red
@@ -782,15 +786,15 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn truncate(s: &str, max_len: usize) -> String {
+fn truncate(s: &str, max_len: usize) -> Cow<'_, str> {
     if s.chars().count() <= max_len {
-        s.to_string()
+        Cow::Borrowed(s)
     } else {
         let end = s
             .char_indices()
             .nth(max_len - 1)
             .map_or(s.len(), |(i, _)| i);
-        format!("{}…", &s[..end])
+        Cow::Owned(format!("{}…", &s[..end]))
     }
 }
 

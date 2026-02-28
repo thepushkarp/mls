@@ -2,7 +2,7 @@
 ///
 /// Renders video thumbnails in the preview pane using halfblocks
 /// (or a better protocol if the terminal supports it).
-use super::{App, ThumbState};
+use super::ThumbState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -11,8 +11,8 @@ use ratatui::widgets::Paragraph;
 use ratatui_image::StatefulImage;
 
 /// Render the thumbnail area in the preview pane.
-pub fn render_thumbnail(frame: &mut Frame, app: &mut App, area: Rect) {
-    match app.thumb_state {
+pub fn render_thumbnail(frame: &mut Frame, thumb_state: &mut ThumbState, area: Rect) {
+    match *thumb_state {
         ThumbState::Loading => {
             let msg = Paragraph::new(Line::styled(
                 "Loading preview...",
