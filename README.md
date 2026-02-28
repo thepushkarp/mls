@@ -1,0 +1,284 @@
+# mls — Media LS
+
+Terminal-native audio/video file browser with metadata columns, TUI preview, and structured JSON output.
+
+Think `fd` meets `ffprobe` meets `lazygit`.
+
+**Dual-mode**: interactive TUI when you're at the terminal, streaming JSON when piped — one tool for humans and scripts.
+
+```
+mls ~/Videos          # TUI browser
+mls ~/Videos | jq .   # streaming NDJSON
+```
+
+## Install
+
+### Prerequisites
+
+```bash
+brew install ffmpeg mpv trash
+```
+
+| Dependency | Required | Purpose |
+|-----------|----------|---------|
+| `ffprobe` (via ffmpeg) | Yes | Metadata extraction |
+| `ffmpeg` | Yes | Thumbnail generation |
+| `mpv` | No | Playback (warned if missing) |
+| `trash` | No | Safe delete in triage mode |
+
+### Build from source
+
+```bash
+git clone https://github.com/user/mls.git  # TODO: real URL
+cd mls
+cargo build --release
+cp target/release/mls ~/.local/bin/  # or anywhere on PATH
+```
+
+Requires **Rust 1.85+** (edition 2024).
+
+## Usage
+
+### Browse (default)
+
+```bash
+mls                           # current directory, TUI
+mls ~/Videos ~/Music          # multiple paths
+mls --max-depth 3 ~/Media     # limit recursion
+```
+
+Output mode is auto-detected:
+- **TTY** → TUI
+- **Piped** → NDJSON
+
+Force a mode with `--tui`, `--json`, or `--ndjson`.
+
+### Structured output
+
+```bash
+# Single JSON document
+mls --json ~/Videos
+
+# Streaming NDJSON (one record per line, as files are probed)
+mls --ndjson ~/Videos
+
+# Pipe to jq
+mls ~/Videos | jq '.entry.media.kind'
+
+# Filter + sort + limit
+mls --json --filter 'duration_ms > 60000' --sort duration_ms:desc --limit 10 .
+```
+
+### Inspect a file
+
+```bash
+mls info movie.mp4
+mls info *.mp4                # multiple files
+```
+
+Outputs detailed JSON metadata for each file.
+
+### Play
+
+```bash
+mls play video.mp4            # video playback via mpv
+mls play song.flac            # audio-only (auto-detected)
+```
+
+### Triage
+
+Interactive keep/delete workflow for batch culling:
+
+```bash
+mls triage ~/Downloads
+```
+
+Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
+
+## TUI Keybindings
+
+### Navigation
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` | Move down |
+| `k` / `↑` | Move up |
+| `g` | Jump to top |
+| `G` | Jump to bottom |
+| `Ctrl-d` | Page down (10) |
+| `Ctrl-u` | Page up (10) |
+| `Enter` | Open file (macOS `open`) |
+
+### Features
+
+| Key | Action |
+|-----|--------|
+| `/` | Filter (type to search, `Enter` to apply, `Esc` to clear) |
+| `s` | Cycle sort key (name → size → date → duration → resolution → codec → bitrate) |
+| `S` | Reverse sort direction |
+| `i` | Toggle metadata panel |
+| `Space` | Mark/unmark file |
+| `?` | Help overlay |
+
+### Playback
+
+| Key | Action |
+|-----|--------|
+| `p` | Play/pause current file via mpv |
+| `]` | Seek forward 5s |
+| `[` | Seek backward 5s |
+
+### Triage mode
+
+| Key | Action |
+|-----|--------|
+| `t` | Enter triage mode |
+| `y` | Keep current file |
+| `n` | Delete (move to Trash) |
+| `u` | Undo last action |
+| `h` / `l` | Navigate without triaging |
+| `q` / `Esc` | Exit triage, show summary |
+
+### Quit
+
+| Key | Action |
+|-----|--------|
+| `q` | Quit |
+| `Ctrl-c` | Quit |
+
+## Filter expressions
+
+Filter media files by metadata fields using a simple expression language:
+
+```bash
+mls --filter 'duration_ms > 60000'                    # longer than 1 minute
+mls --filter 'media.video.width >= 1920'               # 1080p+
+mls --filter 'media.audio.codec.name == "aac"'         # AAC audio
+mls --filter 'media.kind == "av" && duration_ms > 300000'  # video over 5 min
+mls --filter 'extension == "mp4" || extension == "mkv"'    # specific formats
+```
+
+**Operators**: `==` `!=` `>` `>=` `<` `<=`
+
+**Combinators**: `&&` (and), `||` (or), `!` (not), `()` (grouping)
+
+**Values**: numbers (`60000`, `1920.0`), quoted strings (`"aac"`, `'mp4'`), bare identifiers
+
+**Field paths** (dot-separated, resolved against the `MediaEntry` JSON schema):
+- `duration_ms`, `extension`, `path`
+- `media.kind` (`"video"`, `"audio"`, `"av"`)
+- `media.video.width`, `media.video.height`, `media.video.codec.name`
+- `media.audio.codec.name`, `media.audio.channels`, `media.audio.sample_rate`
+- `fs.size`, `fs.modified`
+
+## Sort keys
+
+```bash
+mls --sort name              # ascending by default
+mls --sort duration_ms:desc  # explicit direction
+mls --sort size:asc
+```
+
+| Key | Aliases | Description |
+|-----|---------|-------------|
+| `name` | — | File name |
+| `path` | — | Full path |
+| `size` | — | File size |
+| `modified` | `date` | Modification time |
+| `duration_ms` | `duration` | Duration in ms |
+| `resolution` | — | Pixel area (width x height) |
+| `codec` | — | Video codec (falls back to audio) |
+| `bitrate` | — | Overall bitrate |
+
+## JSON schema
+
+Version: `0.1.0`
+
+### JSON output (`--json`)
+
+```jsonc
+{
+  "schema_version": "0.1.0",
+  "entries": [
+    {
+      "path": "/Users/me/Videos/clip.mp4",
+      "extension": "mp4",
+      "duration_ms": 125400,
+      "media": {
+        "kind": "av",
+        "video": {
+          "width": 1920, "height": 1080,
+          "codec": { "name": "h264", "profile": "High", "level": "4.1" },
+          "fps": { "num": 24000, "den": 1001 },
+          "bitrate": 5200000
+        },
+        "audio": {
+          "codec": { "name": "aac", "profile": "LC" },
+          "channels": 2, "sample_rate": 48000,
+          "bitrate": 128000
+        }
+      },
+      "fs": { "size": 81920000, "modified": "2025-12-01T10:30:00Z" },
+      "tags": { "title": "My Clip", "artist": null, "album": null },
+      "probe": { "backend": "ffprobe", "latency_ms": 42 }
+    }
+  ],
+  "summary": {
+    "entries_total": 1, "entries_emitted": 1,
+    "probe_ok": 1, "probe_error": 0
+  },
+  "errors": []
+}
+```
+
+### NDJSON output (`--ndjson` / piped)
+
+One JSON object per line, streamed as files are probed:
+
+```
+{"type":"header","schema_version":"0.1.0"}
+{"type":"entry","entry":{...}}
+{"type":"footer","summary":{...},"errors":[]}
+```
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Generic/unexpected error |
+| `2` | CLI usage error (bad flag, invalid filter/sort) |
+| `4` | Missing dependency (ffprobe/ffmpeg not found) |
+
+## Supported formats
+
+**Video**: mp4, mkv, mov, avi, wmv, flv, webm, m4v, mpg, mpeg, ts, mts, m2ts, vob, ogv, 3gp, 3g2
+
+**Audio**: mp3, flac, wav, aac, ogg, opus, wma, m4a, aiff, aif, alac, ape, dsf, dff, wv, mka
+
+## Development
+
+```bash
+cargo build                   # debug build
+cargo test                    # 158 unit tests (~0.01s)
+cargo clippy --all-targets --all-features -- -D warnings  # zero warnings
+cargo fmt --check             # formatting
+```
+
+Release build (LTO + strip):
+
+```bash
+cargo build --release
+```
+
+## Status
+
+v0.1.0-dev — functional but pre-release. See the [PRD](docs/plans/resilient-gliding-bear.md) for the full roadmap.
+
+**Working**: TUI browser, JSON/NDJSON output, filter expressions, sort, playback (mpv), triage (keep/delete), metadata inspection.
+
+**Planned**: thumbnail preview, fuzzy filter, triage move-to-directory, Linux support, integration tests.
+
+## License
+
+MIT
