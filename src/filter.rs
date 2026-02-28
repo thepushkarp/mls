@@ -357,6 +357,17 @@ impl Filter {
 
         let mut parser = Parser::new(tokens);
         let expr = parser.parse_expr()?;
+
+        if parser.pos < parser.tokens.len() {
+            return Err(FilterError::Parse {
+                pos: parser.pos,
+                msg: format!(
+                    "unexpected trailing token: {:?}",
+                    parser.tokens[parser.pos]
+                ),
+            });
+        }
+
         Ok(Self { expr })
     }
 
@@ -795,5 +806,39 @@ mod tests {
         // Bare identifier "av" should be treated as string
         let f = Filter::parse("media.kind == av").unwrap();
         assert!(f.matches(&entry).unwrap());
+    }
+
+    // --- Trailing token tests ---
+
+    #[test]
+    fn parse_trailing_garbage_rejected() {
+        let result = Filter::parse("duration_ms > 60000 garbage");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("trailing"),
+            "error should mention trailing token: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_trailing_number_rejected() {
+        let result = Filter::parse("extension == \"mp4\" 42");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_trailing_after_parens_rejected() {
+        let result = Filter::parse("(duration_ms > 60000) extra");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_valid_no_trailing_accepted() {
+        assert!(Filter::parse("duration_ms > 60000").is_ok());
+        assert!(
+            Filter::parse("duration_ms > 60000 && extension == \"mp4\"")
+                .is_ok()
+        );
     }
 }
