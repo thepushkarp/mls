@@ -531,9 +531,76 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
     } else {
-        format!("{}…", &s[..max_len - 1])
+        let end = s
+            .char_indices()
+            .nth(max_len - 1)
+            .map_or(s.len(), |(i, _)| i);
+        format!("{}…", &s[..end])
+    }
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_short_ascii_unchanged() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_exact_length_unchanged() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_long_ascii() {
+        let result = truncate("hello world", 5);
+        assert_eq!(result, "hell…");
+    }
+
+    #[test]
+    fn truncate_japanese_filename() {
+        // 5 Japanese chars, truncate to 3 → 2 chars + ellipsis
+        let result = truncate("映画作品集", 3);
+        assert_eq!(result, "映画…");
+    }
+
+    #[test]
+    fn truncate_emoji_filename() {
+        let result = truncate("🎬🎥🎞️📽️🎦", 3);
+        // 2 emojis + ellipsis
+        let chars: Vec<char> = result.chars().collect();
+        assert_eq!(chars[0], '🎬');
+        assert_eq!(chars[1], '🎥');
+        assert_eq!(*chars.last().unwrap(), '…');
+    }
+
+    #[test]
+    fn truncate_mixed_ascii_and_multibyte() {
+        // "abc映画" is 5 chars, truncate to 4 → "abc…"
+        let result = truncate("abc映画", 4);
+        assert_eq!(result, "abc…");
+    }
+
+    #[test]
+    fn truncate_single_char_limit() {
+        // max_len=1 means 0 content chars + ellipsis
+        let result = truncate("abcdef", 1);
+        assert_eq!(result, "…");
+    }
+
+    #[test]
+    fn truncate_empty_string() {
+        assert_eq!(truncate("", 5), "");
+    }
+
+    #[test]
+    fn truncate_japanese_short_unchanged() {
+        assert_eq!(truncate("映画", 5), "映画");
     }
 }
