@@ -19,6 +19,9 @@ tokio = { version = "1.49.0", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
+[dev-dependencies]
+tempfile = "3.19.1"
+
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 # Panic prevention
