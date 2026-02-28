@@ -19,8 +19,8 @@ pub enum TriageAction {
         index: usize,
         path: PathBuf,
     },
-    #[expect(dead_code, reason = "move-to-directory triage action not yet implemented")]
     Move {
+        #[expect(dead_code, reason = "will be used for triage undo navigation")]
         index: usize,
         from: PathBuf,
         to: PathBuf,
@@ -77,6 +77,7 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                 )
             });
             app.triage = None;
+            app.move_input = None;
             if let Some(msg) = msg {
                 app.status_message = Some(msg);
             }
@@ -114,23 +115,25 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                         app.status_message = Some("Moved to trash".to_string());
                     }
                     _ => {
-                        app.status_message = Some(
-                            "Failed to trash file (install: brew install trash)".to_string(),
-                        );
+                        app.status_message =
+                            Some("Failed to trash file (install: brew install trash)".to_string());
                     }
                 }
             }
         }
         KeyCode::Char('m') => {
-            app.status_message = Some(
-                "Move: directory picker not yet implemented".to_string(),
-            );
+            if let Some(entry) = app.selected_entry() {
+                let parent = entry
+                    .path
+                    .parent()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                app.move_input = Some(parent);
+                app.status_message = Some("Enter destination directory".to_string());
+            }
         }
         KeyCode::Char('u') => {
-            let action = app
-                .triage
-                .as_mut()
-                .and_then(|t| t.history.pop());
+            let action = app.triage.as_mut().and_then(|t| t.history.pop());
             if let Some(action) = action {
                 match action {
                     TriageAction::Keep { .. } => {
@@ -185,9 +188,9 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
         // Playback in triage
         KeyCode::Char('p') => {
             if app.mpv.state() == crate::playback::PlaybackState::Stopped {
-                let info = app.selected_entry().map(|entry| {
-                    (entry.path.clone(), entry.media.video.is_none())
-                });
+                let info = app
+                    .selected_entry()
+                    .map(|entry| (entry.path.clone(), entry.media.video.is_none()));
                 if let Some((path, audio_only)) = info {
                     let _ = app.mpv.play(&path, audio_only).await;
                 }
@@ -199,9 +202,128 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
     }
 }
 
+/// Execute a move operation: move the currently selected file to the
+/// given destination directory. Handles cross-device moves (EXDEV)
+/// by falling back to copy + remove.
+pub async fn execute_move(app: &mut App, dest_dir: &str) {
+    let dest = PathBuf::from(dest_dir);
+
+    if !dest.is_dir() {
+        app.status_message = Some(format!("Not a directory: {dest_dir}"));
+        return;
+    }
+
+    let Some(entry) = app.selected_entry() else {
+        app.status_message = Some("No file selected".to_string());
+        return;
+    };
+
+    let from = entry.path.clone();
+    let file_name = entry.file_name.clone();
+    let to = dest.join(&file_name);
+
+    if to.exists() {
+        app.status_message = Some(format!("File already exists: {}", to.display()));
+        return;
+    }
+
+    // Try rename first (fast, same-filesystem)
+    let result = tokio::fs::rename(&from, &to).await;
+    let ok = match result {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            // Cross-device: fall back to copy + remove
+            match tokio::fs::copy(&from, &to).await {
+                Ok(_) => match tokio::fs::remove_file(&from).await {
+                    Ok(()) => true,
+                    Err(e) => {
+                        // Copy succeeded but remove failed — try to clean up
+                        let _ = tokio::fs::remove_file(&to).await;
+                        app.status_message = Some(format!("Failed to remove original: {e}"));
+                        false
+                    }
+                },
+                Err(e) => {
+                    app.status_message = Some(format!("Failed to copy file: {e}"));
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            app.status_message = Some(format!("Failed to move file: {e}"));
+            false
+        }
+    };
+
+    if ok {
+        if let Some(ref mut triage) = app.triage {
+            let idx = triage.current;
+            triage.history.push(TriageAction::Move {
+                index: idx,
+                from,
+                to,
+            });
+            triage.moved += 1;
+            triage.advance();
+            app.sync_triage_selection();
+        }
+        app.status_message = Some(format!("Moved {file_name} to {dest_dir}"));
+    }
+}
+
 #[cfg(test)]
+#[expect(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::thumbnail::ThumbnailCache;
+    use crate::types::{ContainerInfo, FsInfo, MediaInfo, MediaKind, MediaTags, ProbeInfo};
+
+    fn make_entry(path: PathBuf) -> crate::types::MediaEntry {
+        let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let extension = path
+            .extension()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        crate::types::MediaEntry {
+            path,
+            file_name,
+            extension,
+            fs: FsInfo {
+                size_bytes: 100,
+                modified_at: None,
+                created_at: None,
+            },
+            media: MediaInfo {
+                kind: MediaKind::Video,
+                container: ContainerInfo {
+                    format_name: "mp4".to_string(),
+                    format_primary: "mp4".to_string(),
+                },
+                duration_ms: None,
+                overall_bitrate_bps: None,
+                video: None,
+                audio: None,
+                streams: vec![],
+                tags: MediaTags::default(),
+            },
+            probe: ProbeInfo {
+                backend: "ffprobe".to_string(),
+                took_ms: 10,
+                error: None,
+            },
+        }
+    }
+
+    fn make_triage_app(entries: Vec<crate::types::MediaEntry>) -> App {
+        let count = entries.len();
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = ratatui_image::picker::Picker::halfblocks();
+        let mut app = App::new(entries, vec![], PathBuf::from("/test"), thumb_cache, picker);
+        app.triage = Some(TriageState::new(count));
+        app
+    }
 
     #[test]
     fn triage_state_new_initializes_correctly() {
@@ -240,4 +362,73 @@ mod tests {
         assert_eq!(state.current, 0);
     }
 
+    #[tokio::test]
+    async fn execute_move_moves_file_and_updates_state() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+
+        let file_path = src_dir.path().join("video.mp4");
+        std::fs::write(&file_path, b"fake video data").unwrap();
+
+        let entry = make_entry(file_path.clone());
+        let mut app = make_triage_app(vec![entry]);
+
+        execute_move(&mut app, &dest_dir.path().to_string_lossy()).await;
+
+        // File should be at destination
+        assert!(dest_dir.path().join("video.mp4").exists());
+        // File should be gone from source
+        assert!(!file_path.exists());
+        // Triage state should be updated
+        let triage = app.triage.as_ref().unwrap();
+        assert_eq!(triage.moved, 1);
+        assert_eq!(triage.history.len(), 1);
+        assert!(matches!(triage.history[0], TriageAction::Move { .. }));
+    }
+
+    #[tokio::test]
+    async fn execute_move_rejects_collision() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dest_dir = tempfile::tempdir().unwrap();
+
+        let file_path = src_dir.path().join("video.mp4");
+        std::fs::write(&file_path, b"source data").unwrap();
+        // Pre-existing file at destination
+        std::fs::write(dest_dir.path().join("video.mp4"), b"existing").unwrap();
+
+        let entry = make_entry(file_path.clone());
+        let mut app = make_triage_app(vec![entry]);
+
+        execute_move(&mut app, &dest_dir.path().to_string_lossy()).await;
+
+        // Source should still exist (move was rejected)
+        assert!(file_path.exists());
+        // Triage state should NOT have advanced
+        let triage = app.triage.as_ref().unwrap();
+        assert_eq!(triage.moved, 0);
+        assert!(triage.history.is_empty());
+        // Status should mention collision
+        let msg = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn execute_move_rejects_non_directory() {
+        let src_dir = tempfile::tempdir().unwrap();
+
+        let file_path = src_dir.path().join("video.mp4");
+        std::fs::write(&file_path, b"data").unwrap();
+
+        let entry = make_entry(file_path.clone());
+        let mut app = make_triage_app(vec![entry]);
+
+        execute_move(&mut app, "/nonexistent/path").await;
+
+        // Source should still exist
+        assert!(file_path.exists());
+        let triage = app.triage.as_ref().unwrap();
+        assert_eq!(triage.moved, 0);
+        let msg = app.status_message.as_ref().unwrap();
+        assert!(msg.contains("Not a directory"));
+    }
 }

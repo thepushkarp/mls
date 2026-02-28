@@ -3,8 +3,8 @@
 /// Runs `ffprobe -v quiet -print_format json -show_format -show_streams <file>`
 /// and parses the JSON output into our `MediaEntry` types.
 use crate::types::{
-    AudioInfo, CodecInfo, ContainerInfo, Fps, FsInfo, MediaEntry, MediaInfo, MediaKind,
-    MediaTags, ProbeInfo, StreamInfo, VideoInfo,
+    AudioInfo, CodecInfo, ContainerInfo, Fps, FsInfo, MediaEntry, MediaInfo, MediaKind, MediaTags,
+    ProbeInfo, StreamInfo, VideoInfo,
 };
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -60,8 +60,10 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
         std::time::Duration::from_millis(timeout_ms),
         Command::new("ffprobe")
             .args([
-                "-v", "quiet",
-                "-print_format", "json",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
                 "-show_format",
                 "-show_streams",
             ])
@@ -80,8 +82,8 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
         anyhow::bail!("ffprobe failed: {stderr}");
     }
 
-    let raw: FfprobeOutput = serde_json::from_slice(&output.stdout)
-        .context("failed to parse ffprobe JSON")?;
+    let raw: FfprobeOutput =
+        serde_json::from_slice(&output.stdout).context("failed to parse ffprobe JSON")?;
 
     let fs_meta = std::fs::metadata(path).context("failed to read file metadata")?;
     let fs = build_fs_info(&fs_meta);
@@ -132,12 +134,14 @@ fn build_fs_info(meta: &std::fs::Metadata) -> FsInfo {
 }
 
 fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
-    let has_video = raw.streams.iter().any(|s| {
-        s.codec_type.as_deref() == Some("video")
-    });
-    let has_audio = raw.streams.iter().any(|s| {
-        s.codec_type.as_deref() == Some("audio")
-    });
+    let has_video = raw
+        .streams
+        .iter()
+        .any(|s| s.codec_type.as_deref() == Some("video"));
+    let has_audio = raw
+        .streams
+        .iter()
+        .any(|s| s.codec_type.as_deref() == Some("audio"));
 
     let kind = match (has_video, has_audio) {
         (true, true) => MediaKind::Av,
@@ -147,9 +151,7 @@ fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
 
     let fmt = raw.format.as_ref();
     let container = ContainerInfo {
-        format_name: fmt
-            .and_then(|f| f.format_name.clone())
-            .unwrap_or_default(),
+        format_name: fmt.and_then(|f| f.format_name.clone()).unwrap_or_default(),
         format_primary: fmt
             .and_then(|f| {
                 f.format_name
@@ -221,10 +223,7 @@ fn build_video_info(s: &FfprobeStream) -> VideoInfo {
 }
 
 fn build_audio_info(s: &FfprobeStream) -> AudioInfo {
-    let sample_rate_hz = s
-        .sample_rate
-        .as_deref()
-        .and_then(|r| r.parse::<u32>().ok());
+    let sample_rate_hz = s.sample_rate.as_deref().and_then(|r| r.parse::<u32>().ok());
     let bitrate_bps = s.bit_rate.as_deref().and_then(|b| b.parse::<u64>().ok());
 
     AudioInfo {
@@ -437,10 +436,7 @@ mod tests {
         }
     }
 
-    fn make_format(
-        duration: Option<&str>,
-        bitrate: Option<&str>,
-    ) -> FfprobeFormat {
+    fn make_format(duration: Option<&str>, bitrate: Option<&str>) -> FfprobeFormat {
         FfprobeFormat {
             format_name: Some("mov,mp4,m4a,3gp,3g2,mj2".to_string()),
             duration: duration.map(String::from),

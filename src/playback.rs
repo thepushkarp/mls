@@ -5,8 +5,8 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::UnixStream;
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::process::{Child, Command};
 
 /// mpv playback state.
@@ -36,10 +36,7 @@ impl MpvController {
     /// Create a new controller (mpv not yet spawned).
     #[must_use]
     pub fn new() -> Self {
-        let socket_path = std::env::temp_dir().join(format!(
-            "mls_mpv_{}.sock",
-            std::process::id()
-        ));
+        let socket_path = std::env::temp_dir().join(format!("mls_mpv_{}.sock", std::process::id()));
         Self {
             socket_path,
             child: None,
@@ -119,9 +116,7 @@ impl MpvController {
     /// # Errors
     /// Returns an error if the IPC command fails.
     pub async fn seek(&mut self, seconds: i64) -> Result<()> {
-        let cmd = format!(
-            r#"{{"command": ["seek", "{seconds}", "relative"]}}"#
-        );
+        let cmd = format!(r#"{{"command": ["seek", "{seconds}", "relative"]}}"#);
         self.send_command(&cmd).await
     }
 
@@ -132,13 +127,11 @@ impl MpvController {
     #[expect(dead_code, reason = "will be used for playback progress display")]
     pub async fn get_position(&mut self) -> Result<f64> {
         let resp = self
-            .send_command_with_response(
-                r#"{"command": ["get_property", "time-pos"]}"#,
-            )
+            .send_command_with_response(r#"{"command": ["get_property", "time-pos"]}"#)
             .await?;
 
-        let val: serde_json::Value = serde_json::from_str(&resp)
-            .context("failed to parse mpv response")?;
+        let val: serde_json::Value =
+            serde_json::from_str(&resp).context("failed to parse mpv response")?;
         val.get("data")
             .and_then(serde_json::Value::as_f64)
             .context("no time-pos in response")
@@ -171,10 +164,7 @@ impl MpvController {
         Ok(())
     }
 
-    async fn send_command_with_response(
-        &mut self,
-        cmd: &str,
-    ) -> Result<String> {
+    async fn send_command_with_response(&mut self, cmd: &str) -> Result<String> {
         if let Ok(resp) = self.try_ipc_command(cmd).await {
             Ok(resp)
         } else {
@@ -209,9 +199,7 @@ impl MpvController {
                 reader: BufReader::new(read),
             });
         }
-        self.conn
-            .as_mut()
-            .context("IPC connection not established")
+        self.conn.as_mut().context("IPC connection not established")
     }
 }
 

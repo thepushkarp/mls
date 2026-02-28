@@ -47,9 +47,7 @@ impl std::error::Error for ExitCodeError {}
 async fn main() {
     if let Err(e) = run().await {
         let _ = writeln!(std::io::stderr(), "mls: {e:#}");
-        let code = e
-            .downcast_ref::<ExitCodeError>()
-            .map_or(1, |ec| ec.code);
+        let code = e.downcast_ref::<ExitCodeError>().map_or(1, |ec| ec.code);
         std::process::exit(code);
     }
 }
@@ -126,21 +124,14 @@ async fn run_tui(cli: &Cli, paths: &[std::path::PathBuf]) -> Result<()> {
 }
 
 async fn run_json(cli: &Cli, paths: &[std::path::PathBuf]) -> Result<()> {
-    let (mut entries, errors) = scan::scan_all(
-        paths,
-        cli.max_depth,
-        cli.threads,
-        cli.timeout_ms,
-    )
-    .await?;
+    let (mut entries, errors) =
+        scan::scan_all(paths, cli.max_depth, cli.threads, cli.timeout_ms).await?;
 
     // Apply filter
     if let Some(ref filter_expr) = cli.filter {
-        let f = filter::Filter::parse(filter_expr).map_err(|e| {
-            ExitCodeError {
-                code: exit_code::USAGE,
-                msg: format!("invalid filter: {e}"),
-            }
+        let f = filter::Filter::parse(filter_expr).map_err(|e| ExitCodeError {
+            code: exit_code::USAGE,
+            msg: format!("invalid filter: {e}"),
         })?;
         entries.retain(|entry| f.matches(entry).unwrap_or(false));
     }
@@ -305,9 +296,7 @@ mod tests {
     #[test]
     fn generic_anyhow_error_falls_back_to_code_1() {
         let err = anyhow::anyhow!("some generic error");
-        let code = err
-            .downcast_ref::<ExitCodeError>()
-            .map_or(1, |ec| ec.code);
+        let code = err.downcast_ref::<ExitCodeError>().map_or(1, |ec| ec.code);
         assert_eq!(code, 1);
     }
 }

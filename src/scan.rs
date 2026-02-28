@@ -3,7 +3,7 @@
 /// Filters by recognized media file extensions. Uses tokio for concurrent
 /// metadata probing with configurable concurrency.
 use crate::probe;
-use crate::types::{is_media_extension, MediaEntry, ProbeError};
+use crate::types::{MediaEntry, ProbeError, is_media_extension};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -17,10 +17,7 @@ pub enum ScanResult {
 }
 
 /// Walk directories and collect media file paths (no probing yet).
-pub fn discover_media_files(
-    paths: &[PathBuf],
-    max_depth: Option<usize>,
-) -> Vec<PathBuf> {
+pub fn discover_media_files(paths: &[PathBuf], max_depth: Option<usize>) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut visited = HashSet::new();
     for path in paths {
@@ -105,11 +102,12 @@ pub async fn probe_files(
                     let _ = tx.send(ScanResult::Entry(Box::new(entry))).await;
                 }
                 Err(e) => {
-                    let _ = tx.send(ScanResult::Error(ProbeError {
-                        path: file,
-                        error: e.to_string(),
-                    }))
-                    .await;
+                    let _ = tx
+                        .send(ScanResult::Error(ProbeError {
+                            path: file,
+                            error: e.to_string(),
+                        }))
+                        .await;
                 }
             }
         });

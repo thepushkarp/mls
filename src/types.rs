@@ -337,21 +337,20 @@ pub fn format_bitrate(bps: u64) -> String {
 
 /// Recognized media file extensions.
 pub const VIDEO_EXTENSIONS: &[&str] = &[
-    "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "m4v", "mpg", "mpeg",
-    "ts", "mts", "m2ts", "vob", "ogv", "3gp", "3g2",
+    "mp4", "mkv", "mov", "avi", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "ts", "mts", "m2ts",
+    "vob", "ogv", "3gp", "3g2",
 ];
 
 pub const AUDIO_EXTENSIONS: &[&str] = &[
-    "mp3", "flac", "wav", "aac", "ogg", "opus", "wma", "m4a", "aiff", "aif",
-    "alac", "ape", "dsf", "dff", "wv", "mka",
+    "mp3", "flac", "wav", "aac", "ogg", "opus", "wma", "m4a", "aiff", "aif", "alac", "ape", "dsf",
+    "dff", "wv", "mka",
 ];
 
 /// Check if a file extension is a recognized media type.
 #[must_use]
 pub fn is_media_extension(ext: &str) -> bool {
     let ext_lower = ext.to_ascii_lowercase();
-    VIDEO_EXTENSIONS.contains(&ext_lower.as_str())
-        || AUDIO_EXTENSIONS.contains(&ext_lower.as_str())
+    VIDEO_EXTENSIONS.contains(&ext_lower.as_str()) || AUDIO_EXTENSIONS.contains(&ext_lower.as_str())
 }
 
 /// Check if a file extension is a recognized video type.
@@ -460,7 +459,10 @@ mod tests {
 
     #[test]
     fn fps_as_f64_normal() {
-        let fps = Fps { num: 24000, den: 1001 };
+        let fps = Fps {
+            num: 24000,
+            den: 1001,
+        };
         let val = fps.as_f64();
         assert!((val - 23.976).abs() < 0.01);
     }
@@ -485,7 +487,10 @@ mod tests {
 
     #[test]
     fn fps_display_fractional() {
-        let fps = Fps { num: 24000, den: 1001 };
+        let fps = Fps {
+            num: 24000,
+            den: 1001,
+        };
         assert_eq!(fps.to_string(), "23.976");
     }
 

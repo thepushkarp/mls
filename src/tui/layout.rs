@@ -3,19 +3,15 @@
 /// Three panes: parent dir | current file list | preview (thumbnail + metadata).
 /// Footer shows contextual keybindings.
 use super::App;
-use crate::types::{
-    format_bitrate, format_duration, format_size, MediaKind,
-};
+use crate::types::{MediaKind, format_bitrate, format_duration, format_size};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, Clear, List, ListItem, Paragraph, Wrap,
-};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
 /// Main render function — lays out all panes.
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
 
     // Top-level: main area + footer
@@ -56,9 +52,13 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.filter_active {
         render_filter_input(frame, size);
     }
+
+    if let Some(ref text) = app.move_input {
+        render_move_input(frame, size, text);
+    }
 }
 
-fn render_miller_columns(frame: &mut Frame, app: &App, area: Rect) {
+fn render_miller_columns(frame: &mut Frame, app: &mut App, area: Rect) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -94,7 +94,9 @@ fn render_parent_pane(frame: &mut Frame, app: &App, area: Rect) {
                         let name = e.file_name().to_string_lossy().into_owned();
                         let is_current = e.path() == app.current_dir;
                         let style = if is_current {
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(Color::Blue)
                         };
@@ -149,11 +151,10 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
             };
 
             // Build compact info line
-            let resolution = entry
-                .media
-                .video
-                .as_ref()
-                .map_or_else(String::new, super::super::types::VideoInfo::resolution_label);
+            let resolution = entry.media.video.as_ref().map_or_else(
+                String::new,
+                super::super::types::VideoInfo::resolution_label,
+            );
             let duration = entry
                 .media
                 .duration_ms
@@ -192,30 +193,59 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(list, area);
 }
 
-#[expect(clippy::too_many_lines)]
-fn render_preview_pane(frame: &mut Frame, app: &App, area: Rect) {
+fn render_preview_pane(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .title(" Preview ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray));
 
-    let Some(entry) = app.selected_entry() else {
+    let Some(entry) = app.selected_entry().cloned() else {
         let empty = Paragraph::new("No file selected").block(block);
         frame.render_widget(empty, area);
         return;
     };
 
-    // Build preview text with metadata
+    // Split preview pane: thumbnail on top, metadata below
+    let has_video = entry.media.video.is_some();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if has_video {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(40), // thumbnail
+                Constraint::Percentage(60), // metadata text
+            ])
+            .split(inner);
+
+        super::preview::render_thumbnail(frame, app, split[0]);
+        render_metadata_text(frame, &entry, split[1]);
+    } else {
+        render_metadata_text(frame, &entry, inner);
+    }
+}
+
+#[expect(clippy::too_many_lines)]
+fn render_metadata_text(frame: &mut Frame, entry: &crate::types::MediaEntry, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     lines.push(Line::from(vec![
         Span::styled("File: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(&entry.file_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            &entry.file_name,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
 
     lines.push(Line::from(vec![
         Span::styled("Kind: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(entry.media.kind.to_string(), Style::default().fg(Color::Yellow)),
+        Span::styled(
+            entry.media.kind.to_string(),
+            Style::default().fg(Color::Yellow),
+        ),
     ]));
 
     if let Some(ref video) = entry.media.video {
@@ -291,10 +321,7 @@ fn render_preview_pane(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled("Duration: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format_duration(dur),
-                Style::default().fg(Color::Green),
-            ),
+            Span::styled(format_duration(dur), Style::default().fg(Color::Green)),
         ]));
     }
 
@@ -312,9 +339,7 @@ fn render_preview_pane(frame: &mut Frame, app: &App, area: Rect) {
 
     // Tags
     let tags = &entry.media.tags;
-    let has_tags = tags.title.is_some()
-        || tags.artist.is_some()
-        || tags.album.is_some();
+    let has_tags = tags.title.is_some() || tags.artist.is_some() || tags.album.is_some();
     if has_tags {
         lines.push(Line::from(""));
         lines.push(Line::styled(
@@ -341,7 +366,7 @@ fn render_preview_pane(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let preview = Paragraph::new(lines).block(block).wrap(Wrap { trim: true });
+    let preview = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(preview, area);
 }
 
@@ -394,21 +419,18 @@ fn render_metadata_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     // Playback indicator
     if let Some(current) = app.mpv.current_file()
-        && current == entry.path {
-            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
-            let state_icon = match app.mpv.state() {
-                crate::playback::PlaybackState::Playing => "▶ Playing",
-                crate::playback::PlaybackState::Paused => "⏸ Paused",
-                crate::playback::PlaybackState::Stopped => "",
-            };
-            spans.push(Span::styled(
-                state_icon,
-                Style::default().fg(Color::Green),
-            ));
-        }
+        && current == entry.path
+    {
+        spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+        let state_icon = match app.mpv.state() {
+            crate::playback::PlaybackState::Playing => "▶ Playing",
+            crate::playback::PlaybackState::Paused => "⏸ Paused",
+            crate::playback::PlaybackState::Stopped => "",
+        };
+        spans.push(Span::styled(state_icon, Style::default().fg(Color::Green)));
+    }
 
-    let bar = Paragraph::new(Line::from(spans))
-        .style(Style::default().bg(Color::Rgb(30, 30, 30)));
+    let bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::Rgb(30, 30, 30)));
     frame.render_widget(bar, area);
 }
 
@@ -445,10 +467,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         "[j/k] nav  [Enter] open  [Space] mark  [p] play  [s] sort  [/] filter  [t] triage  [?] help"
     };
-    let keybindings = Paragraph::new(Line::styled(
-        keys,
-        Style::default().fg(Color::DarkGray),
-    ));
+    let keybindings = Paragraph::new(Line::styled(keys, Style::default().fg(Color::DarkGray)));
     frame.render_widget(keybindings, footer_layout[1]);
 }
 
@@ -457,7 +476,12 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, help_area);
 
     let help_text = vec![
-        Line::styled("mls — Media LS Help", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Line::styled(
+            "mls — Media LS Help",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Line::from(""),
         Line::styled("Navigation", Style::default().add_modifier(Modifier::BOLD)),
         Line::from("  j/k, ↑/↓    Move up/down"),
@@ -507,6 +531,24 @@ fn render_filter_input(frame: &mut Frame, area: Rect) {
         Span::styled("/ ", Style::default().fg(Color::Yellow)),
         Span::raw("(filter input shown in status)"),
     ]));
+    frame.render_widget(input, input_area);
+}
+
+fn render_move_input(frame: &mut Frame, area: Rect, text: &str) {
+    let input_area = Rect {
+        x: area.x + 1,
+        y: area.height.saturating_sub(4),
+        width: area.width.saturating_sub(2),
+        height: 1,
+    };
+
+    frame.render_widget(Clear, input_area);
+    let input = Paragraph::new(Line::from(vec![
+        Span::styled("Move to: ", Style::default().fg(Color::Yellow)),
+        Span::raw(text),
+        Span::styled("_", Style::default().fg(Color::White)),
+    ]))
+    .style(Style::default().bg(Color::Rgb(40, 40, 40)));
     frame.render_widget(input, input_area);
 }
 

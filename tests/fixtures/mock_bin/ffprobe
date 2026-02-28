@@ -1,0 +1,49 @@
+#!/bin/sh
+set -eu
+
+# Mock ffprobe for integration tests.
+# Returns version string for --version, canned JSON for probe calls.
+
+if [ "${1:-}" = "-version" ]; then
+    echo "ffprobe version 7.0.0 Copyright (c) 2007-2024 the FFmpeg developers"
+    exit 0
+fi
+
+# Probe call: return canned JSON matching mls's expected ffprobe output
+cat <<'EOF'
+{
+  "format": {
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "duration": "120.500000",
+    "bit_rate": "5000000",
+    "tags": {
+      "title": "Test Video",
+      "artist": "Test Artist"
+    }
+  },
+  "streams": [
+    {
+      "index": 0,
+      "codec_type": "video",
+      "codec_name": "h264",
+      "profile": "High",
+      "level": 41,
+      "width": 1920,
+      "height": 1080,
+      "r_frame_rate": "24/1",
+      "bit_rate": "4500000",
+      "pix_fmt": "yuv420p"
+    },
+    {
+      "index": 1,
+      "codec_type": "audio",
+      "codec_name": "aac",
+      "profile": "LC",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "sample_rate": "48000",
+      "bit_rate": "128000"
+    }
+  ]
+}
+EOF

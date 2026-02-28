@@ -39,19 +39,13 @@ pub fn sort_entries(entries: &mut [MediaEntry], key: SortKey, dir: SortDir) {
     });
 }
 
-fn compare_by_key(
-    a: &MediaEntry,
-    b: &MediaEntry,
-    key: SortKey,
-) -> std::cmp::Ordering {
+fn compare_by_key(a: &MediaEntry, b: &MediaEntry, key: SortKey) -> std::cmp::Ordering {
     match key {
         SortKey::Path => a.path.cmp(&b.path),
         SortKey::Name => a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()),
         SortKey::Size => a.fs.size_bytes.cmp(&b.fs.size_bytes),
         SortKey::Modified => a.fs.modified_at.cmp(&b.fs.modified_at),
-        SortKey::Duration => {
-            a.media.duration_ms.cmp(&b.media.duration_ms)
-        }
+        SortKey::Duration => a.media.duration_ms.cmp(&b.media.duration_ms),
         SortKey::Resolution => {
             let res_a = a
                 .media
@@ -82,9 +76,10 @@ fn compare_by_key(
                 .unwrap_or("");
             codec_a.cmp(codec_b)
         }
-        SortKey::Bitrate => {
-            a.media.overall_bitrate_bps.cmp(&b.media.overall_bitrate_bps)
-        }
+        SortKey::Bitrate => a
+            .media
+            .overall_bitrate_bps
+            .cmp(&b.media.overall_bitrate_bps),
     }
 }
 
@@ -98,11 +93,7 @@ mod tests {
     };
     use std::path::PathBuf;
 
-    fn make_entry_with(
-        name: &str,
-        size: u64,
-        duration_ms: Option<u64>,
-    ) -> MediaEntry {
+    fn make_entry_with(name: &str, size: u64, duration_ms: Option<u64>) -> MediaEntry {
         MediaEntry {
             path: PathBuf::from(format!("/test/{name}")),
             file_name: name.to_string(),
@@ -133,12 +124,7 @@ mod tests {
         }
     }
 
-    fn make_entry_with_video(
-        name: &str,
-        width: u32,
-        height: u32,
-        codec: &str,
-    ) -> MediaEntry {
+    fn make_entry_with_video(name: &str, width: u32, height: u32, codec: &str) -> MediaEntry {
         let mut entry = make_entry_with(name, 100, None);
         entry.media.video = Some(VideoInfo {
             width,
@@ -213,8 +199,16 @@ mod tests {
     #[test]
     fn parse_sort_spec_all_keys_recognized() {
         let keys = [
-            "path", "name", "size", "date", "modified",
-            "duration", "duration_ms", "resolution", "codec", "bitrate",
+            "path",
+            "name",
+            "size",
+            "date",
+            "modified",
+            "duration",
+            "duration_ms",
+            "resolution",
+            "codec",
+            "bitrate",
         ];
         for key in keys {
             assert!(
@@ -310,12 +304,8 @@ mod tests {
             make_entry_with("medium.mp4", 100, Some(120_000)),
         ];
         sort_entries(&mut entries, SortKey::Duration, SortDir::Asc);
-        let durations: Vec<Option<u64>> =
-            entries.iter().map(|e| e.media.duration_ms).collect();
-        assert_eq!(
-            durations,
-            vec![Some(60_000), Some(120_000), Some(300_000)]
-        );
+        let durations: Vec<Option<u64>> = entries.iter().map(|e| e.media.duration_ms).collect();
+        assert_eq!(durations, vec![Some(60_000), Some(120_000), Some(300_000)]);
     }
 
     #[test]

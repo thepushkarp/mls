@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+# Mock ffmpeg for integration tests.
+# Returns version string for --version, no-op otherwise.
+
+if [ "${1:-}" = "-version" ]; then
+    echo "ffmpeg version 7.0.0 Copyright (c) 2000-2024 the FFmpeg developers"
+    exit 0
+fi
+
+exit 0

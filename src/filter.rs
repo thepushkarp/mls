@@ -199,7 +199,9 @@ impl Lexer {
         if self.chars[self.pos] == '-' {
             self.pos += 1;
         }
-        while self.pos < self.chars.len() && (self.chars[self.pos].is_ascii_digit() || self.chars[self.pos] == '.') {
+        while self.pos < self.chars.len()
+            && (self.chars[self.pos].is_ascii_digit() || self.chars[self.pos] == '.')
+        {
             self.pos += 1;
         }
         let s: String = self.chars[start..self.pos].iter().collect();
@@ -361,10 +363,7 @@ impl Filter {
         if parser.pos < parser.tokens.len() {
             return Err(FilterError::Parse {
                 pos: parser.pos,
-                msg: format!(
-                    "unexpected trailing token: {:?}",
-                    parser.tokens[parser.pos]
-                ),
+                msg: format!("unexpected trailing token: {:?}", parser.tokens[parser.pos]),
             });
         }
 
@@ -378,9 +377,8 @@ impl Filter {
     /// # Errors
     /// Returns a `FilterError` if field resolution or comparison fails.
     pub fn matches(&self, entry: &MediaEntry) -> Result<bool, FilterError> {
-        let json = serde_json::to_value(entry).map_err(|e| {
-            FilterError::Eval(format!("failed to serialize entry: {e}"))
-        })?;
+        let json = serde_json::to_value(entry)
+            .map_err(|e| FilterError::Eval(format!("failed to serialize entry: {e}")))?;
         eval_expr(&self.expr, &json)
     }
 }
@@ -391,12 +389,8 @@ fn eval_expr(expr: &Expr, json: &serde_json::Value) -> Result<bool, FilterError>
             let field_val = resolve_field(json, field);
             compare_values(&field_val, *op, value)
         }
-        Expr::And(left, right) => {
-            Ok(eval_expr(left, json)? && eval_expr(right, json)?)
-        }
-        Expr::Or(left, right) => {
-            Ok(eval_expr(left, json)? || eval_expr(right, json)?)
-        }
+        Expr::And(left, right) => Ok(eval_expr(left, json)? && eval_expr(right, json)?),
+        Expr::Or(left, right) => Ok(eval_expr(left, json)? || eval_expr(right, json)?),
         Expr::Not(inner) => Ok(!eval_expr(inner, json)?),
     }
 }
@@ -423,9 +417,9 @@ fn compare_values(
 
     match value {
         Value::Num(n) => {
-            let field_num = field.as_f64().ok_or_else(|| {
-                FilterError::Eval(format!("field value is not numeric: {field}"))
-            })?;
+            let field_num = field
+                .as_f64()
+                .ok_or_else(|| FilterError::Eval(format!("field value is not numeric: {field}")))?;
             Ok(match op {
                 CmpOp::Eq => (field_num - n).abs() < f64::EPSILON,
                 CmpOp::Ne => (field_num - n).abs() >= f64::EPSILON,
@@ -436,8 +430,10 @@ fn compare_values(
             })
         }
         Value::Str(s) => {
-            let field_str = field
-                .as_str().map_or_else(|| field.to_string().trim_matches('"').to_string(), String::from);
+            let field_str = field.as_str().map_or_else(
+                || field.to_string().trim_matches('"').to_string(),
+                String::from,
+            );
             Ok(match op {
                 CmpOp::Eq => field_str == *s,
                 CmpOp::Ne => field_str != *s,
@@ -519,7 +515,9 @@ mod tests {
         let mut lexer = Lexer::new("field == 42");
         assert!(matches!(lexer.next_token().unwrap(), Token::Ident(s) if s == "field"));
         assert!(matches!(lexer.next_token().unwrap(), Token::Op(CmpOp::Eq)));
-        assert!(matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - 42.0).abs() < f64::EPSILON));
+        assert!(
+            matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - 42.0).abs() < f64::EPSILON)
+        );
         assert!(matches!(lexer.next_token().unwrap(), Token::Eof));
     }
 
@@ -571,7 +569,9 @@ mod tests {
     #[test]
     fn lex_negative_number() {
         let mut lexer = Lexer::new("-42");
-        assert!(matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - (-42.0)).abs() < f64::EPSILON));
+        assert!(
+            matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - (-42.0)).abs() < f64::EPSILON)
+        );
     }
 
     #[test]
@@ -595,7 +595,9 @@ mod tests {
     #[test]
     fn lex_whitespace_skipped() {
         let mut lexer = Lexer::new("   42   ");
-        assert!(matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - 42.0).abs() < f64::EPSILON));
+        assert!(
+            matches!(lexer.next_token().unwrap(), Token::Num(n) if (n - 42.0).abs() < f64::EPSILON)
+        );
         assert!(matches!(lexer.next_token().unwrap(), Token::Eof));
     }
 
@@ -638,9 +640,10 @@ mod tests {
 
     #[test]
     fn parse_nested_parens() {
-        assert!(Filter::parse(
-            "(duration_ms > 60000 || fs.size_bytes > 1000) && extension == \"mp4\""
-        ).is_ok());
+        assert!(
+            Filter::parse("(duration_ms > 60000 || fs.size_bytes > 1000) && extension == \"mp4\"")
+                .is_ok()
+        );
     }
 
     #[test]
@@ -836,9 +839,6 @@ mod tests {
     #[test]
     fn parse_valid_no_trailing_accepted() {
         assert!(Filter::parse("duration_ms > 60000").is_ok());
-        assert!(
-            Filter::parse("duration_ms > 60000 && extension == \"mp4\"")
-                .is_ok()
-        );
+        assert!(Filter::parse("duration_ms > 60000 && extension == \"mp4\"").is_ok());
     }
 }

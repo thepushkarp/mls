@@ -25,8 +25,7 @@ impl ThumbnailCache {
     pub fn new(capacity: usize, cache_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)
             .context("failed to create thumbnail cache directory")?;
-        let size = NonZeroUsize::new(capacity)
-            .context("cache capacity must be > 0")?;
+        let size = NonZeroUsize::new(capacity).context("cache capacity must be > 0")?;
         Ok(Self {
             cache: Mutex::new(LruCache::new(size)),
             cache_dir,
@@ -40,15 +39,15 @@ impl ThumbnailCache {
     ///
     /// # Errors
     /// Returns an error if thumbnail generation fails.
-    #[expect(dead_code, reason = "thumbnail preview not yet wired to UI")]
     pub async fn get_or_generate(&self, path: &Path) -> Result<Vec<u8>> {
         let canonical = path.to_path_buf();
 
         // Check memory cache
         {
-            let mut cache = self.cache.lock().map_err(|e| {
-                anyhow::anyhow!("cache lock poisoned: {e}")
-            })?;
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
             if let Some(data) = cache.get(&canonical) {
                 return Ok(data.clone());
             }
@@ -57,11 +56,13 @@ impl ThumbnailCache {
         // Check disk cache
         let disk_path = self.disk_cache_path(path);
         if disk_path.exists() {
-            let data = tokio::fs::read(&disk_path).await
+            let data = tokio::fs::read(&disk_path)
+                .await
                 .context("failed to read cached thumbnail")?;
-            let mut cache = self.cache.lock().map_err(|e| {
-                anyhow::anyhow!("cache lock poisoned: {e}")
-            })?;
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
             cache.put(canonical, data.clone());
             return Ok(data);
         }
@@ -74,9 +75,10 @@ impl ThumbnailCache {
 
         // Store in memory cache
         {
-            let mut cache = self.cache.lock().map_err(|e| {
-                anyhow::anyhow!("cache lock poisoned: {e}")
-            })?;
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
             cache.put(path.to_path_buf(), data.clone());
         }
 
@@ -102,17 +104,9 @@ async fn generate_thumbnail(path: &Path) -> Result<Vec<u8>> {
     let output_buf = tempfile_path();
 
     let result = Command::new("ffmpeg")
-        .args([
-            "-ss", "5",
-            "-i",
-        ])
+        .args(["-ss", "5", "-i"])
         .arg(path)
-        .args([
-            "-frames:v", "1",
-            "-vf", "scale=320:-1",
-            "-q:v", "5",
-            "-y",
-        ])
+        .args(["-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "5", "-y"])
         .arg(&output_buf)
         .output()
         .await
@@ -123,12 +117,7 @@ async fn generate_thumbnail(path: &Path) -> Result<Vec<u8>> {
         let result = Command::new("ffmpeg")
             .args(["-ss", "0", "-i"])
             .arg(path)
-            .args([
-                "-frames:v", "1",
-                "-vf", "scale=320:-1",
-                "-q:v", "5",
-                "-y",
-            ])
+            .args(["-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "5", "-y"])
             .arg(&output_buf)
             .output()
             .await
@@ -140,7 +129,8 @@ async fn generate_thumbnail(path: &Path) -> Result<Vec<u8>> {
         }
     }
 
-    let data = tokio::fs::read(&output_buf).await
+    let data = tokio::fs::read(&output_buf)
+        .await
         .context("failed to read generated thumbnail")?;
     let _ = tokio::fs::remove_file(&output_buf).await;
     Ok(data)

@@ -1,9 +1,7 @@
 /// Structured output formatting (JSON envelope, NDJSON streaming).
 ///
 /// Handles both `--json` (single document) and `--ndjson` (streaming) modes.
-use crate::types::{
-    ListSummary, MediaEntry, NdjsonRecord, ProbeError,
-};
+use crate::types::{ListSummary, MediaEntry, NdjsonRecord, ProbeError};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -56,8 +54,7 @@ pub fn write_json<W: Write>(
         errors,
     };
 
-    serde_json::to_writer_pretty(writer, &envelope)
-        .context("failed to write JSON output")?;
+    serde_json::to_writer_pretty(writer, &envelope).context("failed to write JSON output")?;
     Ok(())
 }
 
@@ -71,8 +68,7 @@ pub fn write_ndjson_header<W: Write>(writer: &mut W) -> Result<()> {
         mls_version: MLS_VERSION.to_string(),
         generated_at: Utc::now(),
     };
-    serde_json::to_writer(&mut *writer, &record)
-        .context("failed to write NDJSON header")?;
+    serde_json::to_writer(&mut *writer, &record).context("failed to write NDJSON header")?;
     writeln!(writer)?;
     writer.flush()?;
     Ok(())
@@ -91,8 +87,7 @@ struct NdjsonEntryRef<'a> {
 /// Returns an error if writing fails.
 pub fn write_ndjson_entry<W: Write>(writer: &mut W, entry: &MediaEntry) -> Result<()> {
     let record = NdjsonEntryRef { entry };
-    serde_json::to_writer(&mut *writer, &record)
-        .context("failed to write NDJSON entry")?;
+    serde_json::to_writer(&mut *writer, &record).context("failed to write NDJSON entry")?;
     writeln!(writer)?;
     writer.flush()?;
     Ok(())
@@ -117,8 +112,7 @@ pub fn write_ndjson_footer<W: Write>(
     errors: &[ProbeError],
 ) -> Result<()> {
     let record = NdjsonFooterRef { summary, errors };
-    serde_json::to_writer(&mut *writer, &record)
-        .context("failed to write NDJSON footer")?;
+    serde_json::to_writer(&mut *writer, &record).context("failed to write NDJSON footer")?;
     writeln!(writer)?;
     writer.flush()?;
     Ok(())
@@ -128,16 +122,11 @@ pub fn write_ndjson_footer<W: Write>(
 ///
 /// # Errors
 /// Returns an error if writing fails.
-pub fn write_info_json<W: Write>(
-    writer: &mut W,
-    entries: &[MediaEntry],
-) -> Result<()> {
+pub fn write_info_json<W: Write>(writer: &mut W, entries: &[MediaEntry]) -> Result<()> {
     if entries.len() == 1 {
-        serde_json::to_writer_pretty(writer, &entries[0])
-            .context("failed to write info JSON")?;
+        serde_json::to_writer_pretty(writer, &entries[0]).context("failed to write info JSON")?;
     } else {
-        serde_json::to_writer_pretty(writer, entries)
-            .context("failed to write info JSON")?;
+        serde_json::to_writer_pretty(writer, entries).context("failed to write info JSON")?;
     }
     Ok(())
 }
