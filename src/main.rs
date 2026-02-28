@@ -19,12 +19,38 @@ use clap::Parser;
 use cli::{Cli, Command, OutputMode};
 use std::io::Write;
 
+/// Agent-friendly exit codes per PRD spec.
+mod exit_code {
+    /// CLI usage error (bad flag, invalid filter/sort).
+    pub const USAGE: i32 = 2;
+    // exit code 3 (walk/path error) reserved per PRD — add when walk errors are wired
+    /// Backend/dependency failure (ffprobe not found).
+    pub const DEPENDENCY: i32 = 4;
+}
+
+/// Error wrapper that carries a specific process exit code.
+#[derive(Debug)]
+struct ExitCodeError {
+    code: i32,
+    msg: String,
+}
+
+impl std::fmt::Display for ExitCodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.msg)
+    }
+}
+
+impl std::error::Error for ExitCodeError {}
+
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
-        // Print error to stderr (not stdout, which may be JSON)
         let _ = writeln!(std::io::stderr(), "mls: {e:#}");
-        std::process::exit(1);
+        let code = e
+            .downcast_ref::<ExitCodeError>()
+            .map_or(1, |ec| ec.code);
+        std::process::exit(code);
     }
 }
 
@@ -45,7 +71,11 @@ async fn run() -> Result<()> {
         if let Some(msg) = dep_check.missing_message() {
             let _ = writeln!(std::io::stderr(), "{msg}");
         }
-        anyhow::bail!("required dependencies missing (exit code 4)");
+        return Err(ExitCodeError {
+            code: exit_code::DEPENDENCY,
+            msg: "required dependencies missing".into(),
+        }
+        .into());
     }
 
     // Warn about optional deps (mpv)
@@ -107,7 +137,10 @@ async fn run_json(cli: &Cli, paths: &[std::path::PathBuf]) -> Result<()> {
     // Apply filter
     if let Some(ref filter_expr) = cli.filter {
         let f = filter::Filter::parse(filter_expr).map_err(|e| {
-            anyhow::anyhow!("invalid filter: {e}")
+            ExitCodeError {
+                code: exit_code::USAGE,
+                msg: format!("invalid filter: {e}"),
+            }
         })?;
         entries.retain(|entry| f.matches(entry).unwrap_or(false));
     }
@@ -117,7 +150,11 @@ async fn run_json(cli: &Cli, paths: &[std::path::PathBuf]) -> Result<()> {
         if let Some((key, dir)) = sort::parse_sort_spec(sort_spec) {
             sort::sort_entries(&mut entries, key, dir);
         } else {
-            anyhow::bail!("unknown sort key: {sort_spec}");
+            return Err(ExitCodeError {
+                code: exit_code::USAGE,
+                msg: format!("unknown sort key: {sort_spec}"),
+            }
+            .into());
         }
     }
 
@@ -147,7 +184,10 @@ async fn run_ndjson(cli: &Cli, paths: &[std::path::PathBuf]) -> Result<()> {
         .as_ref()
         .map(|expr| filter::Filter::parse(expr))
         .transpose()
-        .map_err(|e| anyhow::anyhow!("invalid filter: {e}"))?;
+        .map_err(|e| ExitCodeError {
+            code: exit_code::USAGE,
+            msg: format!("invalid filter: {e}"),
+        })?;
 
     tokio::spawn(async move {
         scan::probe_files(files, concurrency, timeout_ms, tx).await;
@@ -228,4 +268,46 @@ async fn run_play(file: &std::path::Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_code_constants_match_prd_spec() {
+        assert_eq!(exit_code::USAGE, 2);
+        assert_eq!(exit_code::DEPENDENCY, 4);
+    }
+
+    #[test]
+    fn exit_code_error_displays_message() {
+        let err = ExitCodeError {
+            code: exit_code::DEPENDENCY,
+            msg: "ffprobe not found".into(),
+        };
+        assert_eq!(err.to_string(), "ffprobe not found");
+        assert_eq!(err.code, 4);
+    }
+
+    #[test]
+    fn exit_code_error_downcast_from_anyhow() {
+        let err: anyhow::Error = ExitCodeError {
+            code: exit_code::USAGE,
+            msg: "bad filter".into(),
+        }
+        .into();
+        let ec = err.downcast_ref::<ExitCodeError>();
+        assert!(ec.is_some());
+        assert_eq!(ec.map(|e| e.code), Some(2));
+    }
+
+    #[test]
+    fn generic_anyhow_error_falls_back_to_code_1() {
+        let err = anyhow::anyhow!("some generic error");
+        let code = err
+            .downcast_ref::<ExitCodeError>()
+            .map_or(1, |ec| ec.code);
+        assert_eq!(code, 1);
+    }
 }

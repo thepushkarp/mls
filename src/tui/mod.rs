@@ -189,6 +189,14 @@ impl App {
         self.status_message = Some(format!("Sort: {}", self.sort_key.label()));
     }
 
+    /// Sync `selected` from triage cursor, clamped to `filtered_indices`.
+    pub(crate) fn sync_triage_selection(&mut self) {
+        if let Some(ref triage) = self.triage {
+            let max = self.filtered_indices.len().saturating_sub(1);
+            self.selected = triage.current.min(max);
+        }
+    }
+
     /// Reverse sort direction.
     fn reverse_sort(&mut self) {
         self.sort_dir = self.sort_dir.toggle();
@@ -270,10 +278,14 @@ async fn event_loop(
         }
 
         // Poll for events with 100ms timeout (for playback state updates)
-        if event::poll(Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()? {
-                handle_key(app, key).await;
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) => handle_key(app, key).await,
+                // Resize triggers a re-render on the next loop iteration
+                Event::Resize(..) => continue,
+                _ => {}
             }
+        }
 
         // Update mpv state
         if app.mpv.state() != PlaybackState::Stopped && !app.mpv.is_alive() {
