@@ -36,7 +36,11 @@ impl MpvController {
     /// Create a new controller (mpv not yet spawned).
     #[must_use]
     pub fn new() -> Self {
-        let socket_path = std::env::temp_dir().join(format!("mls_mpv_{}.sock", std::process::id()));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let socket_path =
+            std::env::temp_dir().join(format!("mls_mpv_{}_{id}.sock", std::process::id()));
         Self {
             socket_path,
             child: None,
@@ -85,18 +89,33 @@ impl MpvController {
         self.state = PlaybackState::Playing;
         self.current_file = Some(path.to_path_buf());
 
-        // Wait briefly for socket to appear
+        // Wait for socket to appear
+        let mut socket_ready = false;
         for _ in 0..20 {
             if self.socket_path.exists() {
+                socket_ready = true;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        if !socket_ready {
+            // mpv started but socket never appeared — check if process died
+            if !self.is_alive() {
+                self.state = PlaybackState::Stopped;
+                anyhow::bail!("mpv process exited before IPC socket was ready");
+            }
+            tracing::warn!("mpv IPC socket not ready after 1s, continuing anyway");
         }
 
         Ok(())
     }
 
     /// Toggle play/pause.
+    ///
+    /// Note: internal state tracking may desync if mpv is controlled
+    /// externally (e.g., via another IPC client). The TUI event loop
+    /// detects process exit but not external state changes.
     ///
     /// # Errors
     /// Returns an error if the IPC command fails.
@@ -116,7 +135,7 @@ impl MpvController {
     /// # Errors
     /// Returns an error if the IPC command fails.
     pub async fn seek(&mut self, seconds: i64) -> Result<()> {
-        let cmd = format!(r#"{{"command": ["seek", "{seconds}", "relative"]}}"#);
+        let cmd = format!(r#"{{"command": ["seek", {seconds}, "relative"]}}"#);
         self.send_command(&cmd).await
     }
 
@@ -180,12 +199,12 @@ impl MpvController {
     }
 
     async fn send_command_with_response(&mut self, cmd: &str) -> Result<String> {
-        if let Ok(resp) = self.try_ipc_command(cmd).await {
-            Ok(resp)
-        } else {
+        let result = self.try_ipc_command(cmd).await;
+        if result.is_err() {
+            // Drop broken connection so next call reconnects
             self.conn = None;
-            self.try_ipc_command(cmd).await
         }
+        result
     }
 
     async fn try_ipc_command(&mut self, cmd: &str) -> Result<String> {
@@ -196,19 +215,32 @@ impl MpvController {
             .context("failed to write to mpv IPC")?;
         conn.writer.write_all(b"\n").await?;
 
-        // Read lines, skipping async event objects (contain "event" key but no "error" key).
-        // mpv interleaves these with command responses.
+        // Read lines, skipping async event objects.
+        // mpv interleaves command responses (have "error" key) with
+        // async events (have "event" key). Parse JSON structurally to
+        // distinguish them — substring matching false-positives on paths.
         for _ in 0..10 {
             let mut line = String::new();
             conn.reader
                 .read_line(&mut line)
                 .await
                 .context("failed to read mpv response")?;
-            // Command responses contain "error" key; async events contain "event" key
-            if line.contains("\"error\"") || !line.contains("\"event\"") {
+
+            // Parse as JSON to distinguish command responses from events
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
+                // Command responses have an "error" field ("success" on success)
+                if val.get("error").is_some() {
+                    return Ok(line);
+                }
+                // If it's not an event either, treat it as a response
+                if val.get("event").is_none() {
+                    return Ok(line);
+                }
+                // Otherwise it's an async event — skip
+            } else {
+                // Non-JSON response — return as-is
                 return Ok(line);
             }
-            // Otherwise it's an async event — skip and read next line
         }
         anyhow::bail!("too many mpv async events before command response")
     }
@@ -236,7 +268,8 @@ impl Default for MpvController {
 
 impl Drop for MpvController {
     fn drop(&mut self) {
-        // Best-effort cleanup
+        // Best-effort cleanup — blocking is acceptable here since it's
+        // a quick unlink on a socket in /tmp, and this runs at shutdown.
         if let Some(ref mut child) = self.child {
             let _ = child.start_kill();
         }
