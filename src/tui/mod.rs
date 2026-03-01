@@ -112,6 +112,9 @@ pub struct App {
     triage: Option<triage::TriageState>,
     /// Current directory being browsed.
     current_dir: PathBuf,
+    /// Navigation ceiling — the directory where `mls tui` was invoked.
+    /// Users can navigate into subdirectories but not above this path.
+    root_dir: PathBuf,
     /// Should quit.
     should_quit: bool,
     /// Status message (transient).
@@ -163,7 +166,7 @@ impl App {
     ) -> Self {
         let filtered_indices: Vec<usize> = (0..entries.len()).collect();
         let dir_items = list_subdirs(&current_dir);
-        let sibling_dirs = list_sibling_dirs(&current_dir);
+        let root_dir = current_dir.clone();
         Self {
             entries,
             errors,
@@ -184,13 +187,14 @@ impl App {
             thumb_path: None,
             triage: None,
             current_dir,
+            root_dir,
             should_quit: false,
             status_message: None,
             status_ticks: 0,
             fuzzy_matcher: Matcher::new(Config::DEFAULT),
             move_input: None,
             dir_items,
-            sibling_dirs,
+            sibling_dirs: Vec::new(),
             dir_scan_rx: None,
             dir_scanning: false,
             scan_concurrency,
@@ -502,7 +506,11 @@ impl App {
     /// Navigate to a directory: load subdirs, clear state, spawn async scan.
     fn navigate_to_dir(&mut self, path: PathBuf) {
         self.dir_items = list_subdirs(&path);
-        self.sibling_dirs = list_sibling_dirs(&path);
+        self.sibling_dirs = if path == self.root_dir {
+            Vec::new()
+        } else {
+            list_sibling_dirs(&path)
+        };
 
         // Clear media state (but NOT mpv playback — per spec)
         self.entries.clear();
@@ -816,9 +824,11 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
                 let _ = open_file(&path);
             }
         }
-        // Navigate to parent
+        // Navigate to parent (blocked at root_dir)
         (KeyCode::Left | KeyCode::Backspace | KeyCode::Char('h'), _) => {
-            if let Some(parent) = app.current_dir.parent().map(std::path::Path::to_path_buf) {
+            if app.current_dir != app.root_dir
+                && let Some(parent) = app.current_dir.parent().map(std::path::Path::to_path_buf)
+            {
                 app.navigate_to_dir(parent);
             }
         }
