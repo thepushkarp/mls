@@ -69,6 +69,8 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
                 "-show_streams",
             ])
             .arg(path)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
             .output(),
     )
     .await

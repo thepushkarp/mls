@@ -98,6 +98,7 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                 // Try to use `trash` command (macOS safe delete)
                 let result = tokio::process::Command::new("trash")
                     .arg(&path)
+                    .stdin(std::process::Stdio::null())
                     .output()
                     .await;
 

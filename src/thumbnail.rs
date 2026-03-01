@@ -114,6 +114,7 @@ async fn generate_thumbnail(path: &Path) -> Result<Vec<u8>> {
         .arg(path)
         .args(["-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "5", "-y"])
         .arg(&output_buf)
+        .stdin(std::process::Stdio::null())
         .output()
         .await
         .context("failed to execute ffmpeg for thumbnail")?;
@@ -125,6 +126,7 @@ async fn generate_thumbnail(path: &Path) -> Result<Vec<u8>> {
             .arg(path)
             .args(["-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "5", "-y"])
             .arg(&output_buf)
+            .stdin(std::process::Stdio::null())
             .output()
             .await
             .context("ffmpeg retry at 0s failed")?;
