@@ -1,10 +1,12 @@
 /// Filter expression parser and evaluator.
 ///
 /// Supports a minimal expression language for filtering media entries:
-///   `duration_ms > 60000`
+///   `media.duration_ms > 60000`
 ///   `media.video.width >= 1920`
 ///   `media.audio.codec.name == "aac"`
-///   `media.kind == "av" && duration_ms > 300000`
+///   `media.kind == "av" && media.duration_ms > 300000`
+///
+/// Common fields have shorthand aliases (e.g. `duration_ms` → `media.duration_ms`).
 ///
 /// Operators: `== != > >= < <=` `&& || !` `()`
 /// Field paths are dot-separated and resolved via typed access on `MediaEntry`.
@@ -14,7 +16,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum FilterError {
-    #[error("parse error at position {pos}: {msg}")]
+    #[error("parse error at token {pos}: {msg}")]
     Parse { pos: usize, msg: String },
     #[error("evaluation error: {0}")]
     Eval(String),
@@ -200,10 +202,17 @@ impl Lexer {
         if self.chars[self.pos] == '-' {
             self.pos += 1;
         }
-        while self.pos < self.chars.len()
-            && (self.chars[self.pos].is_ascii_digit() || self.chars[self.pos] == '.')
-        {
-            self.pos += 1;
+        let mut has_dot = false;
+        while self.pos < self.chars.len() {
+            let ch = self.chars[self.pos];
+            if ch.is_ascii_digit() {
+                self.pos += 1;
+            } else if ch == '.' && !has_dot {
+                has_dot = true;
+                self.pos += 1;
+            } else {
+                break;
+            }
         }
         let s: String = self.chars[start..self.pos].iter().collect();
         let n = s.parse::<f64>().map_err(|_| FilterError::Parse {
@@ -275,7 +284,7 @@ impl Parser {
     fn parse_unary(&mut self) -> Result<Expr, FilterError> {
         if matches!(self.peek(), Token::Not) {
             self.advance();
-            let expr = self.parse_primary()?;
+            let expr = self.parse_unary()?;
             return Ok(Expr::Not(Box::new(expr)));
         }
         self.parse_primary()
@@ -562,11 +571,25 @@ fn resolve_field_typed<'a>(entry: &'a MediaEntry, path: &str) -> FieldValue<'a> 
         "probe.backend" => FieldValue::Str(Cow::Borrowed(&entry.probe.backend)),
         "probe.took_ms" => FieldValue::Num(entry.probe.took_ms as f64),
 
+        // Convenience aliases (top-level shortcuts for common fields)
+        "duration_ms" => resolve_field_typed(entry, "media.duration_ms"),
+        "size_bytes" => resolve_field_typed(entry, "fs.size_bytes"),
+        "kind" => resolve_field_typed(entry, "media.kind"),
+        "width" => resolve_field_typed(entry, "media.video.width"),
+        "height" => resolve_field_typed(entry, "media.video.height"),
+        "bitrate_bps" | "bitrate" => resolve_field_typed(entry, "media.overall_bitrate_bps"),
+
         // Unknown field
-        _ => FieldValue::Null,
+        _ => {
+            tracing::debug!(field = path, "unknown filter field path, treating as null");
+            FieldValue::Null
+        }
     }
 }
 
+// All numeric fields originate from integers (u64/u32/i64) and filter literals
+// are parsed from integer tokens — direct f64 equality is exact for ≤ 2^53.
+#[expect(clippy::float_cmp)]
 fn compare_values(field: &FieldValue<'_>, op: CmpOp, value: &Value) -> Result<bool, FilterError> {
     if matches!(field, FieldValue::Null) {
         return Ok(false);
@@ -574,8 +597,8 @@ fn compare_values(field: &FieldValue<'_>, op: CmpOp, value: &Value) -> Result<bo
 
     match (field, value) {
         (FieldValue::Num(field_num), Value::Num(n)) => Ok(match op {
-            CmpOp::Eq => (field_num - n).abs() < f64::EPSILON,
-            CmpOp::Ne => (field_num - n).abs() >= f64::EPSILON,
+            CmpOp::Eq => *field_num == *n,
+            CmpOp::Ne => *field_num != *n,
             CmpOp::Gt => *field_num > *n,
             CmpOp::Ge => *field_num >= *n,
             CmpOp::Lt => *field_num < *n,
@@ -590,21 +613,34 @@ fn compare_values(field: &FieldValue<'_>, op: CmpOp, value: &Value) -> Result<bo
             CmpOp::Le => field_str.as_ref() <= s.as_str(),
         }),
         (FieldValue::Num(n), Value::Str(s)) => {
-            let field_str = n.to_string();
-            Ok(match op {
-                CmpOp::Eq => field_str == *s,
-                CmpOp::Ne => field_str != *s,
-                CmpOp::Gt => field_str.as_str() > s.as_str(),
-                CmpOp::Ge => field_str.as_str() >= s.as_str(),
-                CmpOp::Lt => field_str.as_str() < s.as_str(),
-                CmpOp::Le => field_str.as_str() <= s.as_str(),
-            })
+            // Try numeric comparison first so `width > "9"` compares 1920 > 9
+            // instead of lexicographic "1920" < "9".
+            if let Ok(s_num) = s.parse::<f64>() {
+                Ok(match op {
+                    CmpOp::Eq => *n == s_num,
+                    CmpOp::Ne => *n != s_num,
+                    CmpOp::Gt => *n > s_num,
+                    CmpOp::Ge => *n >= s_num,
+                    CmpOp::Lt => *n < s_num,
+                    CmpOp::Le => *n <= s_num,
+                })
+            } else {
+                let field_str = n.to_string();
+                Ok(match op {
+                    CmpOp::Eq => field_str == *s,
+                    CmpOp::Ne => field_str != *s,
+                    CmpOp::Gt => field_str.as_str() > s.as_str(),
+                    CmpOp::Ge => field_str.as_str() >= s.as_str(),
+                    CmpOp::Lt => field_str.as_str() < s.as_str(),
+                    CmpOp::Le => field_str.as_str() <= s.as_str(),
+                })
+            }
         }
         (FieldValue::Str(field_str), Value::Num(n)) => {
             if let Ok(field_num) = field_str.parse::<f64>() {
                 Ok(match op {
-                    CmpOp::Eq => (field_num - n).abs() < f64::EPSILON,
-                    CmpOp::Ne => (field_num - n).abs() >= f64::EPSILON,
+                    CmpOp::Eq => field_num == *n,
+                    CmpOp::Ne => field_num != *n,
                     CmpOp::Gt => field_num > *n,
                     CmpOp::Ge => field_num >= *n,
                     CmpOp::Lt => field_num < *n,
@@ -1015,5 +1051,89 @@ mod tests {
     fn parse_valid_no_trailing_accepted() {
         assert!(Filter::parse("duration_ms > 60000").is_ok());
         assert!(Filter::parse("duration_ms > 60000 && extension == \"mp4\"").is_ok());
+    }
+
+    // --- Shorthand alias tests ---
+
+    #[test]
+    fn eval_shorthand_duration_ms() {
+        let entry = make_entry();
+        let f = Filter::parse("duration_ms > 60000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_shorthand_width() {
+        let entry = make_entry();
+        let f = Filter::parse("width == 1920").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_shorthand_kind() {
+        let entry = make_entry();
+        let f = Filter::parse("kind == av").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_shorthand_size_bytes() {
+        let entry = make_entry();
+        let f = Filter::parse("size_bytes == 1000000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    // --- Double negation test ---
+
+    #[test]
+    fn parse_double_negation() {
+        assert!(Filter::parse("!!extension == \"mp4\"").is_ok());
+    }
+
+    #[test]
+    fn eval_double_negation_identity() {
+        let entry = make_entry();
+        let f = Filter::parse("!!extension == \"mp4\"").unwrap();
+        // !!true == true
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    // --- Multi-dot number rejection test ---
+
+    #[test]
+    fn lex_multi_dot_number_rejected() {
+        // 1.2.3 should not parse as a single number token.
+        // The lexer reads "1.2" then stops at the second dot,
+        // which becomes part of a subsequent ident token.
+        let mut lexer = Lexer::new("1.2.3");
+        let first = lexer.next_token().unwrap();
+        assert!(
+            matches!(first, Token::Num(n) if (n - 1.2).abs() < 0.001),
+            "first token should be 1.2, got {first:?}"
+        );
+        // The ".3" becomes an ident starting with '.' — lexer rejects it
+        // because '.' is not alphabetic/underscore.
+        assert!(lexer.next_token().is_err());
+    }
+
+    // --- Large integer equality test ---
+
+    #[test]
+    fn eval_large_integer_equality() {
+        let mut entry = make_entry();
+        // 2^53 = 9007199254740992 — exact in f64
+        entry.fs.size_bytes = 9_007_199_254_740_992;
+        let f = Filter::parse("fs.size_bytes == 9007199254740992").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    // --- Numeric field vs string literal ordering test ---
+
+    #[test]
+    fn eval_numeric_field_gt_string_numeric() {
+        let entry = make_entry();
+        // width=1920, should be numerically > 9 (not lexicographic)
+        let f = Filter::parse("media.video.width > \"9\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
     }
 }
