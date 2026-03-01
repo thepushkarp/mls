@@ -35,6 +35,8 @@ fn setup_media_dir() -> tempfile::TempDir {
     fs::write(tmp.path().join("video_a.mp4"), b"fake mp4 data").unwrap();
     fs::write(tmp.path().join("video_b.mkv"), b"fake mkv data").unwrap();
     fs::write(tmp.path().join("song.mp3"), b"fake mp3 data").unwrap();
+    fs::write(tmp.path().join("photo.jpg"), b"fake jpg data").unwrap();
+    fs::write(tmp.path().join("screenshot.png"), b"fake png data").unwrap();
     fs::write(tmp.path().join("readme.txt"), b"not media").unwrap();
     tmp
 }
@@ -125,8 +127,8 @@ fn json_output_valid_schema() {
     assert!(json["summary"]["entries_total"].is_number());
 
     let entries = json["entries"].as_array().unwrap();
-    // Should find 3 media files (mp4, mkv, mp3) — not the .txt
-    assert_eq!(entries.len(), 3);
+    // Should find 5 media files (mp4, mkv, mp3, jpg, png) — not the .txt
+    assert_eq!(entries.len(), 5);
 }
 
 #[test]
@@ -224,4 +226,96 @@ fn json_limit_truncates() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let entries = json["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
+}
+
+// --- Image support ---
+
+#[test]
+fn json_images_have_kind_image() {
+    let tmp = setup_media_dir();
+    let output = mls_cmd().arg("--json").arg(tmp.path()).output().unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+
+    let images: Vec<&serde_json::Value> = entries
+        .iter()
+        .filter(|e| e["media"]["kind"] == "image")
+        .collect();
+
+    assert_eq!(images.len(), 2, "expected 2 image entries (jpg + png)");
+
+    for img in &images {
+        let ext = img["extension"].as_str().unwrap();
+        assert!(
+            ext == "jpg" || ext == "png",
+            "unexpected image extension: {ext}"
+        );
+    }
+}
+
+#[test]
+fn json_images_have_dimensions_but_no_duration() {
+    let tmp = setup_media_dir();
+    let output = mls_cmd().arg("--json").arg(tmp.path()).output().unwrap();
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+
+    let img = entries
+        .iter()
+        .find(|e| e["file_name"] == "photo.jpg")
+        .unwrap();
+
+    assert_eq!(img["media"]["kind"], "image");
+    // Images have dimensions via video stream
+    assert!(img["media"]["video"]["width"].is_number());
+    assert!(img["media"]["video"]["height"].is_number());
+    // Images should not have duration or bitrate
+    assert!(img["media"]["duration_ms"].is_null());
+    assert!(img["media"]["overall_bitrate_bps"].is_null());
+}
+
+#[test]
+fn json_filter_kind_image_returns_only_images() {
+    let tmp = setup_media_dir();
+    let output = mls_cmd()
+        .arg("--json")
+        .arg("--filter")
+        .arg("kind == image")
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+
+    assert_eq!(entries.len(), 2, "expected only 2 image entries");
+    for entry in entries {
+        assert_eq!(entry["media"]["kind"], "image");
+    }
+}
+
+#[test]
+fn json_filter_kind_excludes_other_kinds() {
+    let tmp = setup_media_dir();
+
+    // kind == audio should return only the mp3
+    let output = mls_cmd()
+        .arg("--json")
+        .arg("--filter")
+        .arg("kind == audio")
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+
+    assert_eq!(entries.len(), 1, "expected only 1 audio entry");
+    assert_eq!(entries[0]["media"]["kind"], "audio");
+    assert_eq!(entries[0]["extension"], "mp3");
 }

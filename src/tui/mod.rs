@@ -11,7 +11,7 @@ use crate::playback::{MpvController, PlaybackState};
 use crate::scan;
 use crate::sort::sort_entries;
 use crate::thumbnail::ThumbnailCache;
-use crate::types::{MediaEntry, ProbeError, SortDir, SortKey};
+use crate::types::{MediaEntry, MediaKind, ProbeError, SortDir, SortKey};
 use anyhow::{Context, Result};
 use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -37,15 +37,17 @@ pub enum FilterMode {
     Structured,
 }
 
-/// Media kind pre-filter (1/2/3 keys).
+/// Media kind pre-filter (1/2/3/4 keys).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KindFilter {
     /// Show all media types.
     All,
-    /// Show only files with a video stream.
+    /// Show only video/av files.
     Video,
     /// Show only audio-only files (no video stream).
     Audio,
+    /// Show only image files.
+    Image,
 }
 
 impl KindFilter {
@@ -56,6 +58,7 @@ impl KindFilter {
             Self::All => "All",
             Self::Video => "Video",
             Self::Audio => "Audio",
+            Self::Image => "Image",
         }
     }
 }
@@ -267,8 +270,9 @@ impl App {
     fn matches_kind(&self, entry: &MediaEntry) -> bool {
         match self.kind_filter {
             KindFilter::All => true,
-            KindFilter::Video => entry.media.video.is_some(),
-            KindFilter::Audio => entry.media.video.is_none(),
+            KindFilter::Video => matches!(entry.media.kind, MediaKind::Video | MediaKind::Av),
+            KindFilter::Audio => matches!(entry.media.kind, MediaKind::Audio),
+            KindFilter::Image => matches!(entry.media.kind, MediaKind::Image),
         }
     }
 
@@ -447,7 +451,7 @@ impl App {
             return;
         };
 
-        // Skip audio-only files
+        // Skip files with no visual content (audio-only)
         if entry.media.video.is_none() {
             self.thumb_state = ThumbState::Empty;
             self.thumb_path = None;
@@ -481,10 +485,14 @@ impl App {
         };
 
         match rx.try_recv() {
-            Ok(Ok(jpeg_bytes)) => {
+            Ok(Ok(image_bytes)) => {
                 self.thumb_receiver = None;
-                let cursor = std::io::Cursor::new(jpeg_bytes);
-                match image::ImageReader::with_format(cursor, image::ImageFormat::Jpeg).decode() {
+                let cursor = std::io::Cursor::new(image_bytes);
+                match image::ImageReader::new(cursor)
+                    .with_guessed_format()
+                    .context("failed to guess image format")
+                    .and_then(|r| r.decode().context("failed to decode image"))
+                {
                     Ok(dyn_img) => {
                         let proto = self.picker.new_resize_protocol(dyn_img);
                         self.thumb_state = ThumbState::Ready(Box::new(proto));
@@ -798,6 +806,11 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             app.apply_filter();
             app.set_status("Filter: Audio".to_string());
         }
+        (KeyCode::Char('4'), _) => {
+            app.kind_filter = KindFilter::Image;
+            app.apply_filter();
+            app.set_status("Filter: Image".to_string());
+        }
         // Playback
         (KeyCode::Char('p'), _) => handle_playback(app).await,
         (KeyCode::Char('P'), _) => {
@@ -980,6 +993,7 @@ mod tests {
                 audio: None,
                 streams: vec![],
                 tags: MediaTags::default(),
+                exif: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
@@ -1161,12 +1175,8 @@ mod tests {
         app.kind_filter = KindFilter::Video;
         app.apply_filter();
 
-        // Video filter: entries with video stream (Video and Av kinds)
-        // But our make_entry has video: None, so we need entries with video
-        // make_entry_with_kind only sets kind, not video stream — use matches_kind
-        // Video filter checks entry.media.video.is_some(), not kind enum
-        // All our test entries have video: None, so Video filter shows nothing
-        assert_eq!(app.filtered_indices.len(), 0);
+        // Video filter matches MediaKind::Video and MediaKind::Av (2 entries).
+        assert_eq!(app.filtered_indices.len(), 2);
     }
 
     #[test]
@@ -1188,10 +1198,10 @@ mod tests {
             5000,
         );
 
-        // All entries have video: None, so Audio filter shows all
+        // Audio filter matches only MediaKind::Audio (1 entry).
         app.kind_filter = KindFilter::Audio;
         app.apply_filter();
-        assert_eq!(app.filtered_indices.len(), 2);
+        assert_eq!(app.filtered_indices.len(), 1);
     }
 
     #[test]
@@ -1205,9 +1215,9 @@ mod tests {
     #[test]
     fn kind_filter_composes_with_fuzzy() {
         let entries = vec![
-            make_entry("alpha.mp4"),
-            make_entry("beta.mp4"),
-            make_entry("gamma.mp3"),
+            make_entry_with_kind("alpha.mp4", MediaKind::Video),
+            make_entry_with_kind("beta.mp4", MediaKind::Video),
+            make_entry_with_kind("gamma.mp3", MediaKind::Audio),
         ];
         let tmp = tempfile::tempdir().unwrap();
         let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
@@ -1222,8 +1232,8 @@ mod tests {
             5000,
         );
 
-        // All entries have video: None → Audio filter shows all
-        app.kind_filter = KindFilter::Audio;
+        // Video kind filter + fuzzy "alpha" → only alpha.mp4 passes both predicates.
+        app.kind_filter = KindFilter::Video;
         app.filter_text = "alpha".to_string();
         app.apply_filter();
         assert_eq!(app.filtered_indices.len(), 1);

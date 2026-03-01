@@ -92,13 +92,25 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
         .await
         .context("failed to read file metadata")?;
     let fs = build_fs_info(&fs_meta);
-    let media = build_media_info(&raw);
-    let file_name = path
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+
     let extension = path
         .extension()
         .map_or_else(String::new, |e| e.to_string_lossy().into_owned());
+
+    let mut media = build_media_info(&raw, &extension);
+
+    // EXIF extraction uses sync I/O — run it off the async executor to avoid
+    // blocking the runtime thread.
+    if media.kind == MediaKind::Image {
+        let exif_path = path.to_path_buf();
+        media.exif = tokio::task::spawn_blocking(move || crate::exif::read_exif(&exif_path))
+            .await
+            .unwrap_or(None);
+    }
+
+    let file_name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
 
     Ok(MediaEntry {
         path: path.to_path_buf(),
@@ -141,7 +153,7 @@ fn build_fs_info(meta: &std::fs::Metadata) -> FsInfo {
     }
 }
 
-fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
+fn build_media_info(raw: &FfprobeOutput, ext: &str) -> MediaInfo {
     let has_video = raw
         .streams
         .iter()
@@ -151,12 +163,17 @@ fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
         .iter()
         .any(|s| s.codec_type.as_deref() == Some("audio"));
 
-    let kind = match (has_video, has_audio) {
-        (true, true) => MediaKind::Av,
-        (true, false) => MediaKind::Video,
+    // Image detection takes priority over stream-based classification.
+    // A JPEG probed with ffprobe will show a video stream, but we still want
+    // MediaKind::Image so that duration/fps/bitrate are suppressed.
+    let is_image = crate::types::is_image_extension(ext);
+    let kind = match (is_image, has_video, has_audio) {
+        (true, _, _) => MediaKind::Image,
+        (false, true, true) => MediaKind::Av,
+        (false, true, false) => MediaKind::Video,
         // No recognized streams — default to Audio rather than
         // introducing a new variant for this rare edge case
-        (false, true | false) => MediaKind::Audio,
+        (false, false, _) => MediaKind::Audio,
     };
 
     let fmt = raw.format.as_ref();
@@ -183,11 +200,32 @@ fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
         .and_then(|f| f.bit_rate.as_deref())
         .and_then(|b| b.parse::<u64>().ok());
 
+    // Images don't have meaningful duration or overall bitrate.
+    let duration_ms = if kind == MediaKind::Image {
+        None
+    } else {
+        duration_ms
+    };
+    let overall_bitrate_bps = if kind == MediaKind::Image {
+        None
+    } else {
+        overall_bitrate_bps
+    };
+
     let video = raw
         .streams
         .iter()
         .find(|s| s.codec_type.as_deref() == Some("video"))
         .map(build_video_info);
+
+    // Images don't have fps or stream bitrate (those are video-specific).
+    let video = video.map(|mut v| {
+        if kind == MediaKind::Image {
+            v.fps = None;
+            v.bitrate_bps = None;
+        }
+        v
+    });
 
     let audio = raw
         .streams
@@ -211,6 +249,7 @@ fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
         audio,
         streams,
         tags,
+        exif: None,
     }
 }
 
@@ -461,7 +500,7 @@ mod tests {
             format: Some(make_format(Some("120.5"), Some("5000000"))),
             streams: vec![make_video_stream(), make_audio_stream()],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.kind, MediaKind::Av);
         assert!(info.video.is_some());
         assert!(info.audio.is_some());
@@ -473,7 +512,7 @@ mod tests {
             format: Some(make_format(Some("120.5"), None)),
             streams: vec![make_video_stream()],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.duration_ms, Some(120_500));
     }
 
@@ -483,7 +522,7 @@ mod tests {
             format: Some(make_format(Some("-5.0"), None)),
             streams: vec![make_video_stream()],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.duration_ms, None);
     }
 
@@ -493,7 +532,7 @@ mod tests {
             format: Some(make_format(None, Some("5000000"))),
             streams: vec![make_video_stream()],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.overall_bitrate_bps, Some(5_000_000));
     }
 
@@ -503,7 +542,7 @@ mod tests {
             format: Some(make_format(None, None)),
             streams: vec![make_video_stream()],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.kind, MediaKind::Video);
         assert!(info.video.is_some());
         assert!(info.audio.is_none());
@@ -515,7 +554,7 @@ mod tests {
             format: Some(make_format(None, None)),
             streams: vec![make_audio_stream()],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.kind, MediaKind::Audio);
         assert!(info.video.is_none());
         assert!(info.audio.is_some());
@@ -527,7 +566,7 @@ mod tests {
             format: Some(make_format(None, None)),
             streams: vec![],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.kind, MediaKind::Audio);
         assert!(info.video.is_none());
         assert!(info.audio.is_none());
@@ -539,7 +578,7 @@ mod tests {
             format: None,
             streams: vec![],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert!(info.duration_ms.is_none());
         assert!(info.overall_bitrate_bps.is_none());
         assert!(info.container.format_name.is_empty());
@@ -551,7 +590,7 @@ mod tests {
             format: Some(make_format(None, None)),
             streams: vec![make_video_stream()],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.container.format_primary, "mov");
         assert!(info.container.format_name.contains("mp4"));
     }
@@ -682,7 +721,7 @@ mod tests {
         }"#;
 
         let raw: FfprobeOutput = serde_json::from_str(json).unwrap();
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.kind, MediaKind::Av);
         assert_eq!(info.duration_ms, Some(90_500));
         assert_eq!(info.overall_bitrate_bps, Some(2_500_000));
@@ -703,7 +742,7 @@ mod tests {
     fn deserialize_minimal_ffprobe_json() {
         let json = r#"{"streams": []}"#;
         let raw: FfprobeOutput = serde_json::from_str(json).unwrap();
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.kind, MediaKind::Audio);
         assert!(info.duration_ms.is_none());
     }
@@ -731,8 +770,56 @@ mod tests {
             }),
             streams: vec![],
         };
-        let info = build_media_info(&raw);
+        let info = build_media_info(&raw, "");
         assert_eq!(info.tags.title.as_deref(), Some("Test Video"));
         assert_eq!(info.tags.artist.as_deref(), Some("Test Artist"));
+    }
+
+    // --- image kind detection ---
+
+    #[test]
+    fn build_media_info_image_ext_with_video_stream_yields_image_kind() {
+        // ffprobe reports a video stream for JPEGs, but ext-based detection takes
+        // priority — we still want MediaKind::Image with no fps/duration.
+        let raw = FfprobeOutput {
+            format: Some(make_format(Some("0.0"), Some("5000000"))),
+            streams: vec![make_video_stream()],
+        };
+        let info = build_media_info(&raw, "jpg");
+        assert_eq!(info.kind, MediaKind::Image);
+        assert_eq!(info.duration_ms, None);
+        assert_eq!(info.overall_bitrate_bps, None);
+        // Video stream is kept for pixel info, but fps and bitrate are nulled.
+        let vid = info.video.unwrap();
+        assert!(vid.fps.is_none());
+        assert!(vid.bitrate_bps.is_none());
+    }
+
+    #[test]
+    fn build_media_info_mp4_ext_with_video_stream_yields_video_kind() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(Some("120.0"), Some("5000000"))),
+            streams: vec![make_video_stream()],
+        };
+        let info = build_media_info(&raw, "mp4");
+        assert_eq!(info.kind, MediaKind::Video);
+        assert_eq!(info.duration_ms, Some(120_000));
+        assert!(info.overall_bitrate_bps.is_some());
+        // fps should be present for real video
+        let vid = info.video.unwrap();
+        assert!(vid.fps.is_some());
+    }
+
+    #[test]
+    fn build_media_info_png_ext_no_streams_yields_image_kind() {
+        let raw = FfprobeOutput {
+            format: Some(make_format(None, None)),
+            streams: vec![],
+        };
+        let info = build_media_info(&raw, "png");
+        assert_eq!(info.kind, MediaKind::Image);
+        assert_eq!(info.duration_ms, None);
+        assert_eq!(info.overall_bitrate_bps, None);
+        assert!(info.video.is_none());
     }
 }

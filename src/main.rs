@@ -4,6 +4,7 @@
 /// output for scripts and AI agents. Think `fd` meets `ffprobe` meets `lazygit`.
 mod cli;
 mod deps;
+mod exif;
 mod filter;
 mod output;
 mod playback;

@@ -571,6 +571,76 @@ fn resolve_field_typed<'a>(entry: &'a MediaEntry, path: &str) -> FieldValue<'a> 
         "probe.backend" => FieldValue::Str(Cow::Borrowed(&entry.probe.backend)),
         "probe.took_ms" => FieldValue::Num(entry.probe.took_ms as f64),
 
+        // media.exif.* — string fields
+        "media.exif.camera_make" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.camera_make.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.camera_model" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.camera_model.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.lens_model" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.lens_model.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.exposure_time" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.exposure_time.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.date_taken" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.date_taken.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        // media.exif.* — numeric fields (f64)
+        "media.exif.focal_length_mm" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.focal_length_mm)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        "media.exif.aperture" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.aperture)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        "media.exif.gps_latitude" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.gps_latitude)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        "media.exif.gps_longitude" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.gps_longitude)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        // media.exif.* — numeric fields (u32 → f64)
+        "media.exif.iso" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.iso)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(f64::from(v))),
+        "media.exif.orientation" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.orientation)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(f64::from(v))),
+
         // Convenience aliases (top-level shortcuts for common fields)
         "duration_ms" => resolve_field_typed(entry, "media.duration_ms"),
         "size_bytes" => resolve_field_typed(entry, "fs.size_bytes"),
@@ -578,6 +648,8 @@ fn resolve_field_typed<'a>(entry: &'a MediaEntry, path: &str) -> FieldValue<'a> 
         "width" => resolve_field_typed(entry, "media.video.width"),
         "height" => resolve_field_typed(entry, "media.video.height"),
         "bitrate_bps" | "bitrate" => resolve_field_typed(entry, "media.overall_bitrate_bps"),
+        "camera" => resolve_field_typed(entry, "media.exif.camera_model"),
+        "iso" => resolve_field_typed(entry, "media.exif.iso"),
 
         // Unknown field
         _ => {
@@ -661,8 +733,8 @@ fn compare_values(field: &FieldValue<'_>, op: CmpOp, value: &Value) -> Result<bo
 mod tests {
     use super::*;
     use crate::types::{
-        AudioInfo, CodecInfo, ContainerInfo, Fps, FsInfo, MediaEntry, MediaInfo, MediaKind,
-        MediaTags, ProbeInfo, VideoInfo,
+        AudioInfo, CodecInfo, ContainerInfo, ExifInfo, Fps, FsInfo, MediaEntry, MediaInfo,
+        MediaKind, MediaTags, ProbeInfo, VideoInfo,
     };
     use std::borrow::Cow;
     use std::path::PathBuf;
@@ -710,6 +782,7 @@ mod tests {
                 }),
                 streams: vec![],
                 tags: MediaTags::default(),
+                exif: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
@@ -1170,6 +1243,140 @@ mod tests {
     fn eval_shorthand_bitrate_alias() {
         let entry = make_entry();
         let f = Filter::parse("bitrate == 5000000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    fn make_image_entry() -> MediaEntry {
+        MediaEntry {
+            path: PathBuf::from("/test/photo.jpg"),
+            file_name: "photo.jpg".to_string(),
+            extension: "jpg".to_string(),
+            fs: FsInfo {
+                size_bytes: 500_000,
+                modified_at: None,
+                created_at: None,
+            },
+            media: MediaInfo {
+                kind: MediaKind::Image,
+                container: ContainerInfo {
+                    format_name: "image2".to_string(),
+                    format_primary: "image2".to_string(),
+                },
+                duration_ms: None,
+                overall_bitrate_bps: None,
+                video: Some(VideoInfo {
+                    width: 4000,
+                    height: 3000,
+                    fps: None,
+                    bitrate_bps: None,
+                    codec: CodecInfo {
+                        name: "mjpeg".to_string(),
+                        profile: None,
+                        level: None,
+                    },
+                    pixel_format: Some("yuvj420p".to_string()),
+                }),
+                audio: None,
+                streams: vec![],
+                tags: MediaTags::default(),
+                exif: Some(ExifInfo {
+                    camera_make: Some("Canon".to_string()),
+                    camera_model: Some("EOS R5".to_string()),
+                    lens_model: Some("RF 50mm F1.2L USM".to_string()),
+                    focal_length_mm: Some(50.0),
+                    aperture: Some(2.8),
+                    exposure_time: Some("1/1000".to_string()),
+                    iso: Some(400),
+                    date_taken: Some("2024:06:15 14:30:00".to_string()),
+                    gps_latitude: Some(35.681_236),
+                    gps_longitude: Some(139.767_125),
+                    orientation: Some(1),
+                }),
+            },
+            probe: ProbeInfo {
+                backend: Cow::Borrowed("ffprobe"),
+                took_ms: 20,
+                error: None,
+            },
+        }
+    }
+
+    // --- Image / EXIF filter tests ---
+
+    #[test]
+    fn eval_kind_image() {
+        let entry = make_image_entry();
+        let f = Filter::parse("kind == image").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_kind_image_excludes_video() {
+        let entry = make_entry();
+        let f = Filter::parse("kind == image").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_exif_iso_gt() {
+        let entry = make_image_entry();
+        let f = Filter::parse("media.exif.iso > 200").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_exif_iso_eq() {
+        let entry = make_image_entry();
+        let f = Filter::parse("media.exif.iso == 400").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_exif_camera_model() {
+        let entry = make_image_entry();
+        let f = Filter::parse("media.exif.camera_model == \"EOS R5\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_exif_focal_length() {
+        let entry = make_image_entry();
+        let f = Filter::parse("media.exif.focal_length_mm == 50").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_exif_aperture_lt() {
+        let entry = make_image_entry();
+        let f = Filter::parse("media.exif.aperture < 4.0").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_shorthand_camera() {
+        let entry = make_image_entry();
+        let f = Filter::parse("camera == \"EOS R5\"").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_shorthand_iso() {
+        let entry = make_image_entry();
+        let f = Filter::parse("iso == 400").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_exif_null_on_video() {
+        let entry = make_entry();
+        let f = Filter::parse("media.exif.iso > 0").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_image_width_via_video_info() {
+        let entry = make_image_entry();
+        let f = Filter::parse("width > 3000").unwrap();
         assert!(f.matches(&entry).unwrap());
     }
 }
