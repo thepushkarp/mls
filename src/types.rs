@@ -379,9 +379,7 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
     "dff", "wv", "mka",
 ];
 
-pub const IMAGE_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif",
-];
+pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif"];
 
 /// Check if a file extension is a recognized media type (video, audio, or image).
 #[must_use]
