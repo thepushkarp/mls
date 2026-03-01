@@ -366,6 +366,7 @@ mod tests {
                 audio: None,
                 streams: vec![],
                 tags: MediaTags::default(),
+                exif: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),

@@ -15,6 +15,8 @@ pub enum MediaKind {
     Audio,
     /// Contains both audio and video streams.
     Av,
+    /// Still image (JPEG, PNG, etc.).
+    Image,
 }
 
 impl std::fmt::Display for MediaKind {
@@ -23,6 +25,7 @@ impl std::fmt::Display for MediaKind {
             Self::Video => write!(f, "video"),
             Self::Audio => write!(f, "audio"),
             Self::Av => write!(f, "av"),
+            Self::Image => write!(f, "image"),
         }
     }
 }
@@ -142,6 +145,33 @@ pub struct MediaTags {
     pub genre: Option<String>,
 }
 
+/// EXIF metadata from image files (camera, lens, exposure, GPS).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExifInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub camera_make: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub camera_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lens_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub focal_length_mm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aperture: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exposure_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iso: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date_taken: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gps_latitude: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gps_longitude: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<u32>,
+}
+
 /// Aggregated media metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaInfo {
@@ -158,6 +188,8 @@ pub struct MediaInfo {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub streams: Vec<StreamInfo>,
     pub tags: MediaTags,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exif: Option<ExifInfo>,
 }
 
 /// File-system metadata.
@@ -347,12 +379,25 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
     "dff", "wv", "mka",
 ];
 
-/// Check if a file extension is a recognized media type.
+pub const IMAGE_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif",
+];
+
+/// Check if a file extension is a recognized media type (video, audio, or image).
 #[must_use]
 pub fn is_media_extension(ext: &str) -> bool {
     VIDEO_EXTENSIONS
         .iter()
         .chain(AUDIO_EXTENSIONS.iter())
+        .chain(IMAGE_EXTENSIONS.iter())
+        .any(|known| ext.eq_ignore_ascii_case(known))
+}
+
+/// Check if a file extension is a recognized image type.
+#[must_use]
+pub fn is_image_extension(ext: &str) -> bool {
+    IMAGE_EXTENSIONS
+        .iter()
         .any(|known| ext.eq_ignore_ascii_case(known))
 }
 
@@ -617,6 +662,7 @@ mod tests {
         assert_eq!(MediaKind::Video.to_string(), "video");
         assert_eq!(MediaKind::Audio.to_string(), "audio");
         assert_eq!(MediaKind::Av.to_string(), "av");
+        assert_eq!(MediaKind::Image.to_string(), "image");
     }
 
     // --- Extension checks ---
@@ -642,6 +688,14 @@ mod tests {
     }
 
     #[test]
+    fn is_media_extension_image() {
+        assert!(is_media_extension("jpg"));
+        assert!(is_media_extension("png"));
+        assert!(is_media_extension("webp"));
+        assert!(is_media_extension("JPEG"));
+    }
+
+    #[test]
     fn is_media_extension_rejects_unknown() {
         assert!(!is_media_extension("txt"));
         assert!(!is_media_extension("pdf"));
@@ -658,5 +712,33 @@ mod tests {
     fn is_video_extension_rejects_audio() {
         assert!(!is_video_extension("mp3"));
         assert!(!is_video_extension("flac"));
+    }
+
+    // --- Image extension checks ---
+
+    #[test]
+    fn is_image_extension_accepts_images() {
+        assert!(is_image_extension("jpg"));
+        assert!(is_image_extension("jpeg"));
+        assert!(is_image_extension("png"));
+        assert!(is_image_extension("webp"));
+        assert!(is_image_extension("gif"));
+        assert!(is_image_extension("bmp"));
+        assert!(is_image_extension("tiff"));
+        assert!(is_image_extension("tif"));
+    }
+
+    #[test]
+    fn is_image_extension_case_insensitive() {
+        assert!(is_image_extension("JPG"));
+        assert!(is_image_extension("Png"));
+    }
+
+    #[test]
+    fn is_image_extension_rejects_non_images() {
+        assert!(!is_image_extension("mp4"));
+        assert!(!is_image_extension("mp3"));
+        assert!(!is_image_extension("txt"));
+        assert!(!is_image_extension(""));
     }
 }

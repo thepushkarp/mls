@@ -211,6 +211,7 @@ fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
         audio,
         streams,
         tags,
+        exif: None,
     }
 }
 

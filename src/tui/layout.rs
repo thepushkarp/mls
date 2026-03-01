@@ -185,6 +185,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                 let kind_icon = match entry.media.kind {
                     MediaKind::Video | MediaKind::Av => "V",
                     MediaKind::Audio => "A",
+                    MediaKind::Image => "I",
                 };
 
                 let resolution = entry.media.video.as_ref().map_or_else(
