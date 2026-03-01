@@ -318,8 +318,13 @@ fn render_metadata_text(frame: &mut Frame, entry: &crate::types::MediaEntry, are
 
     if let Some(ref video) = entry.media.video {
         lines.push(Line::from(""));
+        let section_title = if entry.media.kind == MediaKind::Image {
+            "── Image ──"
+        } else {
+            "── Video ──"
+        };
         lines.push(Line::styled(
-            "── Video ──",
+            section_title,
             Style::default().fg(Color::Cyan),
         ));
         lines.push(Line::from(vec![
@@ -442,6 +447,68 @@ fn render_metadata_text(frame: &mut Frame, entry: &crate::types::MediaEntry, are
             lines.push(Line::from(vec![
                 Span::styled("Album: ", Style::default().fg(Color::DarkGray)),
                 Span::raw(a),
+            ]));
+        }
+    }
+
+    if let Some(ref exif) = entry.media.exif {
+        lines.push(Line::from(""));
+        lines.push(Line::styled(
+            "── EXIF ──",
+            Style::default().fg(Color::Green),
+        ));
+        let mut camera = String::new();
+        if let Some(ref make) = exif.camera_make {
+            camera.push_str(make);
+        }
+        if let Some(ref model) = exif.camera_model {
+            if !camera.is_empty() {
+                camera.push(' ');
+            }
+            camera.push_str(model);
+        }
+        if !camera.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("Camera: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(camera),
+            ]));
+        }
+        if let Some(ref lens) = exif.lens_model {
+            lines.push(Line::from(vec![
+                Span::styled("Lens: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(lens),
+            ]));
+        }
+        // Photo settings line: focal length, aperture, shutter, ISO
+        let mut settings = Vec::new();
+        if let Some(fl) = exif.focal_length_mm {
+            settings.push(format!("{fl}mm"));
+        }
+        if let Some(ap) = exif.aperture {
+            settings.push(format!("f/{ap}"));
+        }
+        if let Some(ref et) = exif.exposure_time {
+            settings.push(format!("{et}s"));
+        }
+        if let Some(iso) = exif.iso {
+            settings.push(format!("ISO {iso}"));
+        }
+        if !settings.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("Settings: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(settings.join("  ")),
+            ]));
+        }
+        if let Some(ref dt) = exif.date_taken {
+            lines.push(Line::from(vec![
+                Span::styled("Date: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(dt),
+            ]));
+        }
+        if let (Some(lat), Some(lon)) = (exif.gps_latitude, exif.gps_longitude) {
+            lines.push(Line::from(vec![
+                Span::styled("GPS: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{lat:.6}, {lon:.6}")),
             ]));
         }
     }
@@ -638,7 +705,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let keys = if app.triage.is_some() {
         "[y] keep  [n] delete  [m] move  [u] undo  [q] quit triage"
     } else {
-        "[j/k] nav  [Enter] open  [p] play  [/] filter  [1/2/3] kind  [s] sort  [t] triage  [?] help"
+        "[j/k] nav  [Enter] open  [p] play  [/] filter  [1/2/3/4] kind  [s] sort  [t] triage  [?] help"
     };
     let keybindings = Paragraph::new(Line::styled(keys, Style::default().fg(Color::DarkGray)));
     frame.render_widget(keybindings, footer_layout[1]);
@@ -665,7 +732,7 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::styled("Actions", Style::default().add_modifier(Modifier::BOLD)),
         Line::from("  /            Fuzzy filter (prefix = for structured)"),
-        Line::from("  1/2/3        Filter: All/Video/Audio"),
+        Line::from("  1/2/3/4      Filter: All/Video/Audio/Image"),
         Line::from("  s/S          Cycle sort / reverse"),
         Line::from("  i            Toggle metadata panel"),
         Line::from("  Space        Mark/unmark file"),

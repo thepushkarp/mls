@@ -1,13 +1,21 @@
 /// Video thumbnail generation via ffmpeg subprocess.
 ///
 /// Extracts a single frame from a video file at a configurable seek position.
-/// Uses an LRU cache to avoid re-generating thumbnails.
+/// Uses an LRU cache to avoid re-generating thumbnails. Images are read
+/// directly without going through ffmpeg or the cache.
 use anyhow::{Context, Result};
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tokio::process::Command;
+
+/// Return true if `path` has an image file extension.
+fn is_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(crate::types::is_image_extension)
+}
 
 /// Thumbnail cache: maps file path to decoded image bytes (JPEG).
 pub struct ThumbnailCache {
@@ -32,14 +40,24 @@ impl ThumbnailCache {
         })
     }
 
-    /// Get or generate a thumbnail for the given video file.
+    /// Get or generate a thumbnail for the given file.
     ///
-    /// Returns JPEG bytes. Uses memory cache first, then disk cache,
-    /// then generates via ffmpeg.
+    /// For image files, reads the file directly — local reads are fast and
+    /// the image bytes can be decoded as-is, so no caching or ffmpeg needed.
+    ///
+    /// For video files, uses memory cache first, then disk cache,
+    /// then generates via ffmpeg (JPEG frame extraction).
     ///
     /// # Errors
-    /// Returns an error if thumbnail generation fails.
+    /// Returns an error if the file cannot be read or thumbnail generation fails.
     pub async fn get_or_generate(&self, path: &Path) -> Result<Vec<u8>> {
+        // Images: read directly — no cache needed (local reads are fast)
+        if is_image_path(path) {
+            return tokio::fs::read(path)
+                .await
+                .context("failed to read image file");
+        }
+
         let cache_key = path.to_path_buf();
 
         // Check memory cache
