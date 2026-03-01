@@ -33,10 +33,10 @@ src/
 ├── playback.rs    # mpv subprocess + Unix IPC socket control
 ├── thumbnail.rs   # ffmpeg thumbnail gen + LRU cache
 └── tui/
-    ├── mod.rs     # App state, event loop, key handling
-    ├── layout.rs  # Ratatui rendering — three-pane Miller columns
-    ├── triage.rs  # Triage mode state + key handling
-    └── preview.rs # Thumbnail rendering in preview pane
+    ├── mod.rs     # App state, event loop, key handling, directory navigation
+    ├── layout.rs  # Ratatui rendering — three-pane Miller columns (parent/files/preview)
+    ├── triage.rs  # Triage mode state + key handling (keep/delete/move)
+    └── preview.rs # Thumbnail rendering in preview pane (ratatui-image)
 ```
 
 ### Data flow
@@ -75,7 +75,7 @@ Cargo.toml enables pedantic clippy with additional denies:
 
 ### Tests
 
-All tests are co-located `#[cfg(test)]` modules at the bottom of each source file. No separate `tests/` directory. Run specific module tests with `cargo test -- <module_name>`.
+Unit tests are co-located `#[cfg(test)]` modules at the bottom of each source file. Integration tests live in `tests/cli.rs` using mock ffprobe/ffmpeg scripts (`tests/fixtures/mock_bin/`). Run specific module tests with `cargo test -- <module_name>`.
 
 ### Logging
 
@@ -94,9 +94,11 @@ JSON output uses borrowing structs (`ListEnvelopeRef<'a>`, `NdjsonEntryRef<'a>`)
 
 ## Gotchas
 
+- **TUI defaults to shallow scan** (depth 0 = current directory only). CLI mode scans recursively by default. Both can be overridden with `--max-depth`.
 - `filter.rs` uses a hand-rolled recursive descent parser. No parser combinator library. The eval resolves dot-separated field paths via typed struct access (FieldValue enum), without JSON serialization.
-- `triage.rs` Move works via text input; interactive directory picker not yet built.
-- `scan.rs` uses bounded `JoinSet` spawns (not a semaphore) for concurrency control.
+- **TUI has two filter modes**: `/` opens fuzzy (nucleo-matcher), prefix `=` switches to structured field expressions using the same parser as `--filter`.
+- `triage.rs` Move (`m` key) works via text input; interactive directory picker not yet built.
+- `scan.rs` uses bounded `JoinSet` spawns (not a semaphore) for concurrency control, with `mpsc` channel for streaming results to the caller.
 
 ## Dependencies (external)
 

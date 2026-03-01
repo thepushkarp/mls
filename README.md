@@ -103,20 +103,22 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 |-----|--------|
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
+| `l` / `→` / `Enter` | Enter directory or open file |
+| `h` / `←` / `Backspace` | Go to parent directory |
 | `g` | Jump to top |
 | `G` | Jump to bottom |
 | `Ctrl-d` | Page down (half screen) |
 | `Ctrl-u` | Page up (half screen) |
-| `Enter` | Open file (macOS `open`) |
 
 ### Features
 
 | Key | Action |
 |-----|--------|
-| `/` | Filter (type to search, `Enter` to apply, `Esc` to clear) |
+| `/` | Filter (fuzzy by default, prefix `=` for structured expressions) |
 | `s` | Cycle sort key (name → size → date → duration → resolution → codec → bitrate) |
 | `S` | Reverse sort direction |
 | `i` | Toggle metadata panel |
+| `1` / `2` / `3` | Kind filter: All / Video / Audio |
 | `Space` | Mark/unmark file |
 | `?` | Help overlay |
 
@@ -125,6 +127,7 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 | Key | Action |
 |-----|--------|
 | `p` | Play/pause current file via mpv |
+| `P` | Stop playback |
 | `]` | Seek forward 5s |
 | `[` | Seek backward 5s |
 
@@ -135,8 +138,10 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 | `t` | Enter triage mode |
 | `y` | Keep current file |
 | `n` | Delete (move to Trash) |
+| `m` | Move to directory (text input) |
 | `u` | Undo last action |
 | `h` / `l` | Navigate without triaging |
+| `p` | Play current file |
 | `q` / `Esc` | Exit triage, show summary |
 
 ### Quit
@@ -147,6 +152,8 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 | `Ctrl-c` | Quit |
 
 ## Filter expressions
+
+In the TUI, `/` opens fuzzy name search by default. Prefix with `=` for structured field expressions. On the CLI, `--filter` always uses structured expressions.
 
 Filter media files by metadata fields using a simple expression language:
 
@@ -168,7 +175,7 @@ mls --filter 'extension == "mp4" || extension == "mkv"'    # specific formats
 - `duration_ms`, `extension`, `path`
 - `media.kind` (`"video"`, `"audio"`, `"av"`)
 - `media.video.width`, `media.video.height`, `media.video.codec.name`
-- `media.audio.codec.name`, `media.audio.channels`, `media.audio.sample_rate`
+- `media.audio.codec.name`, `media.audio.channels`, `media.audio.channel_layout`, `media.audio.sample_rate`
 - `fs.size`, `fs.modified`
 
 ## Sort keys
@@ -214,7 +221,7 @@ Version: `0.1.0`
         },
         "audio": {
           "codec": { "name": "aac", "profile": "LC" },
-          "channels": 2, "sample_rate": 48000,
+          "channels": 2, "channel_layout": "stereo", "sample_rate": 48000,
           "bitrate": 128000
         }
       },
@@ -275,9 +282,9 @@ cargo build --release
 
 v0.1.0-dev — functional but pre-release. See the [PRD](docs/plans/resilient-gliding-bear.md) for the full roadmap.
 
-**Working**: TUI browser, JSON/NDJSON output, filter expressions, sort, playback (mpv), triage (keep/delete), metadata inspection.
+**Working**: TUI browser with Miller column navigation, JSON/NDJSON output, filter expressions (structured + fuzzy), sort, playback (mpv), triage (keep/delete/move), thumbnail preview, metadata inspection, integration tests.
 
-**Planned**: thumbnail preview, fuzzy filter, triage move-to-directory, Linux support, integration tests.
+**Planned**: Linux support, interactive directory picker for triage move.
 
 ## License
 
