@@ -166,6 +166,7 @@ impl App {
     ) -> Self {
         let filtered_indices: Vec<usize> = (0..entries.len()).collect();
         let dir_items = list_subdirs(&current_dir);
+        let sibling_dirs = list_sibling_dirs(&current_dir);
         let root_dir = current_dir.clone();
         Self {
             entries,
@@ -194,7 +195,7 @@ impl App {
             fuzzy_matcher: Matcher::new(Config::DEFAULT),
             move_input: None,
             dir_items,
-            sibling_dirs: Vec::new(),
+            sibling_dirs,
             dir_scan_rx: None,
             dir_scanning: false,
             scan_concurrency,
@@ -506,11 +507,7 @@ impl App {
     /// Navigate to a directory: load subdirs, clear state, spawn async scan.
     fn navigate_to_dir(&mut self, path: PathBuf) {
         self.dir_items = list_subdirs(&path);
-        self.sibling_dirs = if path == self.root_dir {
-            Vec::new()
-        } else {
-            list_sibling_dirs(&path)
-        };
+        self.sibling_dirs = list_sibling_dirs(&path);
 
         // Clear media state (but NOT mpv playback — per spec)
         self.entries.clear();
