@@ -348,6 +348,18 @@ fn render_metadata_text(frame: &mut Frame, entry: &crate::types::MediaEntry, are
                 Span::raw(format_bitrate(bitrate)),
             ]));
         }
+        if let Some(ref audio) = entry.media.audio {
+            lines.push(Line::from(vec![
+                Span::styled("Audio: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{}ch", audio.channels)),
+                Span::raw(
+                    audio
+                        .channel_layout
+                        .as_ref()
+                        .map_or(String::new(), |l| format!(" ({l})")),
+                ),
+            ]));
+        }
     }
 
     if let Some(ref audio) = entry.media.audio {
