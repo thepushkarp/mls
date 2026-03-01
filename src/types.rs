@@ -381,22 +381,22 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
 
 pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif"];
 
-/// Check if a file extension is a recognized media type (video, audio, or image).
-#[must_use]
-pub fn is_media_extension(ext: &str) -> bool {
-    VIDEO_EXTENSIONS
-        .iter()
-        .chain(AUDIO_EXTENSIONS.iter())
-        .chain(IMAGE_EXTENSIONS.iter())
-        .any(|known| ext.eq_ignore_ascii_case(known))
-}
-
 /// Check if a file extension is a recognized image type.
 #[must_use]
 pub fn is_image_extension(ext: &str) -> bool {
     IMAGE_EXTENSIONS
         .iter()
         .any(|known| ext.eq_ignore_ascii_case(known))
+}
+
+/// Check if a file extension is a recognized media type (video, audio, or image).
+#[must_use]
+pub fn is_media_extension(ext: &str) -> bool {
+    VIDEO_EXTENSIONS
+        .iter()
+        .chain(AUDIO_EXTENSIONS.iter())
+        .any(|known| ext.eq_ignore_ascii_case(known))
+        || is_image_extension(ext)
 }
 
 /// Check if a file extension is a recognized video type.
