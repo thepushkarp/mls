@@ -23,10 +23,16 @@ pub fn parse_sort_spec(spec: &str) -> Option<(SortKey, SortDir)> {
         "bitrate" => SortKey::Bitrate,
         _ => return None,
     };
-    let dir = if dir_str == Some("desc") {
-        SortDir::Desc
-    } else {
-        SortDir::Asc
+    let dir = match dir_str {
+        Some("desc") => SortDir::Desc,
+        Some("asc") | None => SortDir::Asc,
+        Some(other) => {
+            tracing::debug!(
+                direction = other,
+                "unrecognized sort direction, defaulting to asc"
+            );
+            SortDir::Asc
+        }
     };
     Some((key, dir))
 }

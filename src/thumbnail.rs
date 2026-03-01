@@ -40,7 +40,7 @@ impl ThumbnailCache {
     /// # Errors
     /// Returns an error if thumbnail generation fails.
     pub async fn get_or_generate(&self, path: &Path) -> Result<Vec<u8>> {
-        let canonical = path.to_path_buf();
+        let cache_key = path.to_path_buf();
 
         // Check memory cache
         {
@@ -48,7 +48,7 @@ impl ThumbnailCache {
                 .cache
                 .lock()
                 .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
-            if let Some(data) = cache.get(&canonical) {
+            if let Some(data) = cache.get(&cache_key) {
                 return Ok(data.clone());
             }
         }
@@ -63,7 +63,7 @@ impl ThumbnailCache {
                 .cache
                 .lock()
                 .map_err(|e| anyhow::anyhow!("cache lock poisoned: {e}"))?;
-            cache.put(canonical, data.clone());
+            cache.put(cache_key, data.clone());
             return Ok(data);
         }
 
@@ -86,14 +86,20 @@ impl ThumbnailCache {
     }
 
     fn disk_cache_path(&self, path: &Path) -> PathBuf {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        path.hash(&mut hasher);
-        let hash = hasher.finish();
+        let hash = stable_path_hash(path);
         self.cache_dir.join(format!("{hash:016x}.jpg"))
     }
+}
+
+/// FNV-1a hash — stable across Rust versions (unlike `DefaultHasher`).
+fn stable_path_hash(path: &Path) -> u64 {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV prime
+    }
+    hash
 }
 
 /// Generate a JPEG thumbnail from a video file using ffmpeg.
@@ -129,10 +135,16 @@ async fn generate_thumbnail(path: &Path) -> Result<Vec<u8>> {
         }
     }
 
-    let data = tokio::fs::read(&output_buf)
-        .await
-        .context("failed to read generated thumbnail")?;
-    let _ = tokio::fs::remove_file(&output_buf).await;
+    let data = match tokio::fs::read(&output_buf).await {
+        Ok(data) => {
+            let _ = tokio::fs::remove_file(&output_buf).await;
+            data
+        }
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&output_buf).await;
+            return Err(anyhow::anyhow!("failed to read generated thumbnail: {e}"));
+        }
+    };
     Ok(data)
 }
 
@@ -155,7 +167,10 @@ pub fn default_cache_dir() -> PathBuf {
 }
 
 fn dirs_cache_macos() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let home = std::env::var("HOME").unwrap_or_else(|_| {
+        tracing::warn!("HOME not set, falling back to /tmp for thumbnail cache");
+        "/tmp".to_string()
+    });
     PathBuf::from(home)
         .join("Library")
         .join("Caches")
@@ -165,7 +180,10 @@ fn dirs_cache_macos() -> PathBuf {
 
 fn dirs_cache_xdg() -> PathBuf {
     let cache = std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let home = std::env::var("HOME").unwrap_or_else(|_| {
+            tracing::warn!("HOME not set, falling back to /tmp for thumbnail cache");
+            "/tmp".to_string()
+        });
         format!("{home}/.cache")
     });
     PathBuf::from(cache).join("mls").join("thumbnails")

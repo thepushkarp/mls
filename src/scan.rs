@@ -4,7 +4,7 @@
 /// metadata probing with configurable concurrency.
 use crate::probe;
 use crate::types::{MediaEntry, ProbeError, is_media_extension};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -141,7 +141,10 @@ pub async fn scan_all(
     concurrency: usize,
     timeout_ms: u64,
 ) -> Result<(Vec<MediaEntry>, Vec<ProbeError>)> {
-    let files = discover_media_files(paths, max_depth);
+    let paths = paths.to_vec();
+    let files = tokio::task::spawn_blocking(move || discover_media_files(&paths, max_depth))
+        .await
+        .context("directory walk task failed")?;
     let (tx, mut rx) = mpsc::channel(256);
 
     tokio::spawn(async move {

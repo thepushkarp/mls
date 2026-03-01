@@ -220,11 +220,7 @@ async fn run_info(cli: &Cli, files: &[std::path::PathBuf]) -> Result<()> {
         match probe::probe_file(file, cli.timeout_ms).await {
             Ok(entry) => entries.push(entry),
             Err(e) => {
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "mls: error probing {}: {e}",
-                    file.display()
-                );
+                tracing::error!(path = %file.display(), "error probing file: {e}");
             }
         }
     }
@@ -250,12 +246,20 @@ async fn run_play(file: &std::path::Path) -> Result<()> {
         .await
         .context("failed to start playback")?;
 
-    // Wait for mpv to finish
+    // Wait for mpv to finish — Ctrl-C is handled by tokio's default signal handler
+    // which will drop the MpvController and clean up the subprocess
     loop {
-        if !mpv.is_alive() {
-            break;
+        tokio::select! {
+            () = async { let _ = tokio::signal::ctrl_c().await; } => {
+                mpv.stop().await;
+                break;
+            }
+            () = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                if !mpv.is_alive() {
+                    break;
+                }
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 
     Ok(())

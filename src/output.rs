@@ -54,7 +54,8 @@ pub fn write_json<W: Write>(
         errors,
     };
 
-    serde_json::to_writer_pretty(writer, &envelope).context("failed to write JSON output")?;
+    serde_json::to_writer_pretty(&mut *writer, &envelope).context("failed to write JSON output")?;
+    writer.flush().context("failed to flush JSON output")?;
     Ok(())
 }
 
@@ -124,9 +125,11 @@ pub fn write_ndjson_footer<W: Write>(
 /// Returns an error if writing fails.
 pub fn write_info_json<W: Write>(writer: &mut W, entries: &[MediaEntry]) -> Result<()> {
     if entries.len() == 1 {
-        serde_json::to_writer_pretty(writer, &entries[0]).context("failed to write info JSON")?;
+        serde_json::to_writer_pretty(&mut *writer, &entries[0])
+            .context("failed to write info JSON")?;
     } else {
-        serde_json::to_writer_pretty(writer, entries).context("failed to write info JSON")?;
+        serde_json::to_writer_pretty(&mut *writer, entries).context("failed to write info JSON")?;
     }
+    writer.flush().context("failed to flush info JSON")?;
     Ok(())
 }

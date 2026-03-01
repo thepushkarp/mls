@@ -1,5 +1,8 @@
 #![expect(clippy::unwrap_used)]
-#![allow(deprecated)] // cargo_bin deprecation may be reverted (assert-rs/assert_cmd#265)
+#![expect(
+    deprecated,
+    reason = "cargo_bin deprecation may be reverted (assert-rs/assert_cmd#265)"
+)]
 //! Integration tests for the mls CLI.
 //!
 //! Uses mock ffprobe/ffmpeg scripts prepended to PATH so tests

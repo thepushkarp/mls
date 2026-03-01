@@ -31,30 +31,37 @@ impl DepCheck {
     }
 
     /// Build a user-friendly error message for missing dependencies.
+    ///
+    /// Separates hard (required) and soft (optional) dependencies into
+    /// distinct "Error:" and "Warning:" sections.
     #[must_use]
     pub fn missing_message(&self) -> Option<String> {
-        let mut missing = Vec::new();
+        let mut hard_missing = Vec::new();
+        let mut soft_missing = Vec::new();
 
         if self.ffprobe.is_none() || self.ffmpeg.is_none() {
-            missing.push("ffmpeg (includes ffprobe): brew install ffmpeg");
+            hard_missing.push("ffmpeg (includes ffprobe): brew install ffmpeg");
         }
         if self.mpv.is_none() {
-            missing.push("mpv (for playback): brew install mpv");
+            soft_missing.push("mpv (for playback): brew install mpv");
         }
 
-        if missing.is_empty() {
+        if hard_missing.is_empty() && soft_missing.is_empty() {
             return None;
         }
 
-        let severity = if self.hard_deps_ok() {
-            "Warning: optional dependencies missing"
-        } else {
-            "Error: required dependencies missing"
-        };
-
-        let mut msg = format!("{severity}:\n");
-        for m in &missing {
-            let _ = writeln!(msg, "  - {m}");
+        let mut msg = String::new();
+        if !hard_missing.is_empty() {
+            let _ = writeln!(msg, "Error: required dependencies missing:");
+            for m in &hard_missing {
+                let _ = writeln!(msg, "  - {m}");
+            }
+        }
+        if !soft_missing.is_empty() {
+            let _ = writeln!(msg, "Warning: optional dependencies missing:");
+            for m in &soft_missing {
+                let _ = writeln!(msg, "  - {m}");
+            }
         }
         Some(msg)
     }

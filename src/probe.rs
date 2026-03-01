@@ -112,7 +112,10 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
     })
 }
 
-#[expect(clippy::cast_possible_wrap)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "Unix timestamp seconds fit i64 until year 2262"
+)]
 fn build_fs_info(meta: &std::fs::Metadata) -> FsInfo {
     use chrono::{DateTime, Utc};
     use std::time::UNIX_EPOCH;
@@ -149,7 +152,9 @@ fn build_media_info(raw: &FfprobeOutput) -> MediaInfo {
     let kind = match (has_video, has_audio) {
         (true, true) => MediaKind::Av,
         (true, false) => MediaKind::Video,
-        _ => MediaKind::Audio,
+        // No recognized streams — default to Audio rather than
+        // introducing a new variant for this rare edge case
+        (false, true | false) => MediaKind::Audio,
     };
 
     let fmt = raw.format.as_ref();

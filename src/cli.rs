@@ -5,6 +5,16 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+fn parse_threads(s: &str) -> Result<usize, String> {
+    let n: usize = s
+        .parse()
+        .map_err(|_| format!("{s} is not a valid number"))?;
+    if n == 0 {
+        return Err("threads must be at least 1".to_string());
+    }
+    Ok(n)
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "mls",
@@ -54,7 +64,7 @@ pub struct Cli {
     pub max_depth: Option<usize>,
 
     /// Metadata probe concurrency.
-    #[arg(long, global = true, default_value = "16")]
+    #[arg(long, global = true, default_value = "16", value_parser = parse_threads)]
     pub threads: usize,
 
     /// Per-file probe timeout in milliseconds.
