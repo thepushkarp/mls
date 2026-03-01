@@ -295,13 +295,6 @@ Release build (LTO + strip):
 cargo build --release
 ```
 
-## Status
-
-v0.0.1 — functional but pre-release. See the [PRD](docs/plans/resilient-gliding-bear.md) for the full roadmap.
-
-**Working**: TUI browser with Miller column navigation, JSON/NDJSON output, filter expressions (structured + fuzzy), sort, playback (mpv), triage (keep/delete/move), thumbnail preview, metadata inspection, image support with EXIF metadata extraction, integration tests.
-
-**Planned**: Linux support, interactive directory picker for triage move.
 
 ## License
 
