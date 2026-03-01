@@ -608,7 +608,8 @@ pub async fn run(
         current_dir
     });
 
-    let (mut entries, errors) = scan::scan_all(paths, max_depth, concurrency, timeout_ms).await?;
+    let (mut entries, errors) =
+        scan::scan_all(paths, Some(max_depth.unwrap_or(0)), concurrency, timeout_ms).await?;
 
     // Sort by name initially
     sort_entries(&mut entries, SortKey::Name, SortDir::Asc);
