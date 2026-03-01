@@ -79,7 +79,7 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
             app.triage = None;
             app.move_input = None;
             if let Some(msg) = msg {
-                app.status_message = Some(msg);
+                app.set_status(msg);
             }
         }
         KeyCode::Char('y') => {
@@ -103,20 +103,38 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
 
                 match result {
                     Ok(output) if output.status.success() => {
+                        app.remove_selected_entry();
                         if let Some(ref mut triage) = app.triage {
                             let idx = triage.current;
                             triage
                                 .history
                                 .push(TriageAction::Delete { index: idx, path });
                             triage.deleted += 1;
-                            triage.advance();
+                            triage.total = triage.total.saturating_sub(1);
+                            // Re-clamp cursor after entry removal
+                            if triage.current >= triage.total && triage.total > 0 {
+                                triage.current = triage.total - 1;
+                            }
                             app.sync_triage_selection();
                         }
-                        app.status_message = Some("Moved to trash".to_string());
+                        app.set_status("Moved to trash".to_string());
                     }
-                    _ => {
-                        app.status_message =
-                            Some("Failed to trash file (install: brew install trash)".to_string());
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        app.set_status(format!(
+                            "Failed to trash file: {}",
+                            if stderr.trim().is_empty() {
+                                "unknown error (is `trash` installed? brew install trash)"
+                                    .to_string()
+                            } else {
+                                stderr.trim().to_string()
+                            }
+                        ));
+                    }
+                    Err(e) => {
+                        app.set_status(format!(
+                            "Failed to run trash command: {e} (install: brew install trash)"
+                        ));
                     }
                 }
             }
@@ -129,7 +147,7 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 app.move_input = Some(parent);
-                app.status_message = Some("Enter destination directory".to_string());
+                app.set_status("Enter destination directory".to_string());
             }
         }
         KeyCode::Char('u') => {
@@ -142,14 +160,14 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                             triage.current = triage.current.saturating_sub(1);
                             app.sync_triage_selection();
                         }
-                        app.status_message = Some("Undid keep".to_string());
+                        app.set_status("Undid keep".to_string());
                     }
                     TriageAction::Delete { path, .. } => {
                         // Delete cannot be undone — file is in macOS system
                         // Trash. Don't adjust counters or cursor; just inform
                         // the user. The action is consumed from history so
                         // subsequent undos operate on prior actions.
-                        app.status_message = Some(format!(
+                        app.set_status(format!(
                             "Cannot undo delete \u{2014} file is in system Trash: {}",
                             path.display()
                         ));
@@ -162,14 +180,14 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
                                 triage.current = triage.current.saturating_sub(1);
                                 app.sync_triage_selection();
                             }
-                            app.status_message = Some("Undid move".to_string());
+                            app.set_status("Undid move".to_string());
                         } else {
-                            app.status_message = Some("Failed to undo move".to_string());
+                            app.set_status("Failed to undo move".to_string());
                         }
                     }
                 }
             } else {
-                app.status_message = Some("Nothing to undo".to_string());
+                app.set_status("Nothing to undo".to_string());
             }
         }
         // Navigation within triage
@@ -209,12 +227,12 @@ pub async fn execute_move(app: &mut App, dest_dir: &str) {
     let dest = PathBuf::from(dest_dir);
 
     if !dest.is_dir() {
-        app.status_message = Some(format!("Not a directory: {dest_dir}"));
+        app.set_status(format!("Not a directory: {dest_dir}"));
         return;
     }
 
     let Some(entry) = app.selected_entry() else {
-        app.status_message = Some("No file selected".to_string());
+        app.set_status("No file selected".to_string());
         return;
     };
 
@@ -222,10 +240,26 @@ pub async fn execute_move(app: &mut App, dest_dir: &str) {
     let file_name = entry.file_name.clone();
     let to = dest.join(&file_name);
 
-    if to.exists() {
-        app.status_message = Some(format!("File already exists: {}", to.display()));
-        return;
-    }
+    // Atomically claim the destination path to prevent TOCTOU race.
+    // `create_new(true)` uses O_CREAT | O_EXCL — fails if file exists.
+    let sentinel = match tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&to)
+        .await
+    {
+        Ok(guard) => guard,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            app.set_status(format!("File already exists: {}", to.display()));
+            return;
+        }
+        Err(e) => {
+            app.set_status(format!("Cannot create destination: {e}"));
+            return;
+        }
+    };
+    // Close the sentinel file handle before rename overwrites it.
+    drop(sentinel);
 
     // Try rename first (fast, same-filesystem)
     let result = tokio::fs::rename(&from, &to).await;
@@ -238,24 +272,44 @@ pub async fn execute_move(app: &mut App, dest_dir: &str) {
                     Ok(()) => true,
                     Err(e) => {
                         // Copy succeeded but remove failed — try to clean up
-                        let _ = tokio::fs::remove_file(&to).await;
-                        app.status_message = Some(format!("Failed to remove original: {e}"));
+                        if let Err(cleanup_err) = tokio::fs::remove_file(&to).await {
+                            tracing::warn!(
+                                "failed to clean up partial copy at {}: {cleanup_err}",
+                                to.display()
+                            );
+                        }
+                        app.set_status(format!("Failed to remove original: {e}"));
                         false
                     }
                 },
                 Err(e) => {
-                    app.status_message = Some(format!("Failed to copy file: {e}"));
+                    // Copy failed — clean up the sentinel file
+                    if let Err(cleanup_err) = tokio::fs::remove_file(&to).await {
+                        tracing::warn!(
+                            "failed to clean up sentinel at {}: {cleanup_err}",
+                            to.display()
+                        );
+                    }
+                    app.set_status(format!("Failed to copy file: {e}"));
                     false
                 }
             }
         }
         Err(e) => {
-            app.status_message = Some(format!("Failed to move file: {e}"));
+            // Rename failed — clean up the sentinel file
+            if let Err(cleanup_err) = tokio::fs::remove_file(&to).await {
+                tracing::warn!(
+                    "failed to clean up sentinel at {}: {cleanup_err}",
+                    to.display()
+                );
+            }
+            app.set_status(format!("Failed to move file: {e}"));
             false
         }
     };
 
     if ok {
+        app.remove_selected_entry();
         if let Some(ref mut triage) = app.triage {
             let idx = triage.current;
             triage.history.push(TriageAction::Move {
@@ -264,10 +318,14 @@ pub async fn execute_move(app: &mut App, dest_dir: &str) {
                 to,
             });
             triage.moved += 1;
-            triage.advance();
+            triage.total = triage.total.saturating_sub(1);
+            // Re-clamp cursor after entry removal
+            if triage.current >= triage.total && triage.total > 0 {
+                triage.current = triage.total - 1;
+            }
             app.sync_triage_selection();
         }
-        app.status_message = Some(format!("Moved {file_name} to {dest_dir}"));
+        app.set_status(format!("Moved {file_name} to {dest_dir}"));
     }
 }
 

@@ -45,13 +45,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(1), Constraint::Length(1)])
                 .split(main_split[1]);
-            if app.show_metadata {
-                render_metadata_bar(frame, app, bar_split[0]);
-                render_playback_bar(frame, app, bar_split[1]);
-            } else {
-                // Only playback (shouldn't happen since bar_height logic)
-                render_playback_bar(frame, app, main_split[1]);
-            }
+            render_metadata_bar(frame, app, bar_split[0]);
+            render_playback_bar(frame, app, bar_split[1]);
         } else if app.show_metadata {
             render_metadata_bar(frame, app, main_split[1]);
         } else {
@@ -151,7 +146,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
     // Calculate visible window
     let inner_height = area.height.saturating_sub(2) as usize;
     let scroll = if app.selected >= inner_height {
-        app.selected - inner_height + 1
+        app.selected.saturating_sub(inner_height / 2)
     } else {
         0
     };
@@ -611,7 +606,11 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
         Line::styled(
             format!(
                 "{}/{} files │ Sort: {} │ [{}]",
-                app.selected + 1,
+                if app.visible_count() == 0 {
+                    0
+                } else {
+                    app.selected + 1
+                },
                 app.visible_count(),
                 app.sort_key.label(),
                 kind_label,
@@ -751,7 +750,7 @@ fn render_filter_input(frame: &mut Frame, app: &App, pane_area: Rect) {
 fn render_move_input(frame: &mut Frame, area: Rect, text: &str) {
     let input_area = Rect {
         x: area.x + 1,
-        y: area.height.saturating_sub(4),
+        y: area.y + area.height.saturating_sub(4),
         width: area.width.saturating_sub(2),
         height: 1,
     };
@@ -787,6 +786,9 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 }
 
 fn truncate(s: &str, max_len: usize) -> Cow<'_, str> {
+    if max_len == 0 {
+        return Cow::Borrowed("");
+    }
     if s.chars().count() <= max_len {
         Cow::Borrowed(s)
     } else {

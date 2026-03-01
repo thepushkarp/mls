@@ -116,10 +116,10 @@ pub struct App {
     current_dir: PathBuf,
     /// Should quit.
     should_quit: bool,
-    /// Scroll offset for the file list.
-    scroll_offset: usize,
     /// Status message (transient).
     status_message: Option<String>,
+    /// Render ticks remaining before `status_message` auto-clears.
+    status_ticks: u8,
     /// Reusable fuzzy matcher (allocates ~135KB scratch space).
     fuzzy_matcher: Matcher,
     /// Move-to-directory input text (None = not in move input mode).
@@ -185,8 +185,8 @@ impl App {
             triage: None,
             current_dir,
             should_quit: false,
-            scroll_offset: 0,
             status_message: None,
+            status_ticks: 0,
             fuzzy_matcher: Matcher::new(Config::DEFAULT),
             move_input: None,
             dir_items,
@@ -347,7 +347,6 @@ impl App {
     /// Move to first entry.
     fn move_top(&mut self) {
         self.selected = 0;
-        self.scroll_offset = 0;
     }
 
     /// Move to last entry.
@@ -368,7 +367,12 @@ impl App {
 
     /// Toggle mark on current entry.
     fn toggle_mark(&mut self) {
-        if let Some(&idx) = self.filtered_indices.get(self.selected) {
+        let dir_count = self.dir_items.len();
+        if self.selected < dir_count {
+            return; // Directories can't be marked
+        }
+        let media_idx = self.selected - dir_count;
+        if let Some(&idx) = self.filtered_indices.get(media_idx) {
             if self.marked.contains(&idx) {
                 self.marked.remove(&idx);
             } else {
@@ -381,7 +385,32 @@ impl App {
     fn cycle_sort(&mut self) {
         self.sort_key = self.sort_key.next();
         self.apply_sort();
-        self.status_message = Some(format!("Sort: {}", self.sort_key.label()));
+        self.set_status(format!("Sort: {}", self.sort_key.label()));
+    }
+
+    /// Set a transient status message that auto-clears after ~3 seconds.
+    pub(crate) fn set_status(&mut self, msg: String) {
+        self.status_message = Some(msg);
+        self.status_ticks = 30;
+    }
+
+    /// Remove the currently selected media entry from the entries list.
+    ///
+    /// Called after successful delete or move in triage mode so the
+    /// stale entry is no longer visible or operable.
+    pub(crate) fn remove_selected_entry(&mut self) {
+        let dir_count = self.dir_items.len();
+        if self.selected < dir_count {
+            return; // Directory item, not removable this way
+        }
+        let media_vis_idx = self.selected - dir_count;
+        if let Some(&real_idx) = self.filtered_indices.get(media_vis_idx) {
+            self.entries.remove(real_idx);
+            self.apply_filter();
+            if self.selected > 0 && self.selected >= self.visible_count() {
+                self.selected = self.visible_count().saturating_sub(1);
+            }
+        }
     }
 
     /// Sync `selected` from triage cursor, clamped to `filtered_indices`.
@@ -400,7 +429,7 @@ impl App {
             SortDir::Asc => "ascending",
             SortDir::Desc => "descending",
         };
-        self.status_message = Some(format!("Sort: {} {dir_label}", self.sort_key.label()));
+        self.set_status(format!("Sort: {} {dir_label}", self.sort_key.label()));
     }
 
     /// Start background thumbnail fetch for the currently selected entry.
@@ -479,7 +508,6 @@ impl App {
         self.errors.clear();
         self.filtered_indices.clear();
         self.selected = 0;
-        self.scroll_offset = 0;
         self.marked.clear();
         self.filter_text.clear();
         self.filter_mode = FilterMode::Fuzzy;
@@ -660,6 +688,14 @@ async fn event_loop(
             }
         }
 
+        // Auto-clear status message after ~3s (30 ticks × 100ms poll)
+        if app.status_message.is_some() {
+            app.status_ticks = app.status_ticks.saturating_sub(1);
+            if app.status_ticks == 0 {
+                app.status_message = None;
+            }
+        }
+
         // Poll for completed thumbnail generation
         app.poll_thumbnail();
 
@@ -729,24 +765,23 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
         }
         (KeyCode::Char('t'), _) => {
             app.triage = Some(triage::TriageState::new(app.filtered_indices.len()));
-            app.status_message =
-                Some("Triage mode — y:keep n:delete m:move u:undo q:quit".to_string());
+            app.set_status("Triage mode — y:keep n:delete m:move u:undo q:quit".to_string());
         }
         // Kind filter
         (KeyCode::Char('1'), _) => {
             app.kind_filter = KindFilter::All;
             app.apply_filter();
-            app.status_message = Some("Filter: All".to_string());
+            app.set_status("Filter: All".to_string());
         }
         (KeyCode::Char('2'), _) => {
             app.kind_filter = KindFilter::Video;
             app.apply_filter();
-            app.status_message = Some("Filter: Video".to_string());
+            app.set_status("Filter: Video".to_string());
         }
         (KeyCode::Char('3'), _) => {
             app.kind_filter = KindFilter::Audio;
             app.apply_filter();
-            app.status_message = Some("Filter: Audio".to_string());
+            app.set_status("Filter: Audio".to_string());
         }
         // Playback
         (KeyCode::Char('p'), _) => handle_playback(app).await,
@@ -755,7 +790,7 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             app.playback_position = None;
             app.playback_duration = None;
             app.playback_file_name = None;
-            app.status_message = Some("Stopped playback".to_string());
+            app.set_status("Stopped playback".to_string());
         }
         (KeyCode::Char(']'), _) => {
             let _ = app.mpv.seek(10).await;
@@ -856,7 +891,7 @@ async fn handle_playback(app: &mut App) {
         app.playback_file_name = Some(name.clone());
         app.playback_position = None;
         app.playback_duration = None;
-        app.status_message = Some(format!("Playing: {name}"));
+        app.set_status(format!("Playing: {name}"));
     }
 }
 
@@ -867,7 +902,7 @@ async fn handle_move_input(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.move_input = None;
-            app.status_message = Some("Move cancelled".to_string());
+            app.set_status("Move cancelled".to_string());
         }
         KeyCode::Enter => {
             let dest = text.clone();
