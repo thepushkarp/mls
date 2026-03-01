@@ -13,6 +13,27 @@ mls ~/Videos | jq .   # streaming NDJSON
 
 ## Install
 
+### Homebrew (macOS)
+
+```bash
+brew install thepushkarp/tap/mls
+```
+
+### Cargo
+
+```bash
+cargo install media-ls
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/thepushkarp/mls.git
+cd mls
+cargo build --release   # requires Rust 1.85+
+cp target/release/mls ~/.local/bin/  # or anywhere on PATH
+```
+
 ### Prerequisites
 
 ```bash
@@ -25,17 +46,6 @@ brew install ffmpeg mpv trash
 | `ffmpeg` | Yes | Thumbnail generation |
 | `mpv` | No | Playback (warned if missing) |
 | `trash` | No | Safe delete in triage mode |
-
-### Build from source
-
-```bash
-git clone https://github.com/user/mls.git  # TODO: real URL
-cd mls
-cargo build --release
-cp target/release/mls ~/.local/bin/  # or anywhere on PATH
-```
-
-Requires **Rust 1.85+** (edition 2024).
 
 ## Usage
 
@@ -287,7 +297,7 @@ cargo build --release
 
 ## Status
 
-v0.1.0-dev — functional but pre-release. See the [PRD](docs/plans/resilient-gliding-bear.md) for the full roadmap.
+v0.0.1 — functional but pre-release. See the [PRD](docs/plans/resilient-gliding-bear.md) for the full roadmap.
 
 **Working**: TUI browser with Miller column navigation, JSON/NDJSON output, filter expressions (structured + fuzzy), sort, playback (mpv), triage (keep/delete/move), thumbnail preview, metadata inspection, image support with EXIF metadata extraction, integration tests.
 

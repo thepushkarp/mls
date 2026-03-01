@@ -1076,6 +1076,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "media-ls"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "crossterm",
+ "image",
+ "kamadak-exif",
+ "lru",
+ "nucleo-matcher",
+ "predicates",
+ "ratatui",
+ "ratatui-image",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1122,31 +1147,6 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "mls"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "crossterm",
- "image",
- "kamadak-exif",
- "lru",
- "nucleo-matcher",
- "predicates",
- "ratatui",
- "ratatui-image",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
