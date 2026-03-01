@@ -47,14 +47,7 @@ fn get_string(exif: &Exif, tag: Tag) -> Option<String> {
 fn get_rational_f64(exif: &Exif, tag: Tag) -> Option<f64> {
     let field = exif.get_field(tag, In::PRIMARY)?;
     match &field.value {
-        Value::Rational(rats) if !rats.is_empty() => {
-            let r = &rats[0];
-            if r.denom == 0 {
-                None
-            } else {
-                Some(f64::from(r.num) / f64::from(r.denom))
-            }
-        }
+        Value::Rational(rats) if !rats.is_empty() => rational_to_f64(rats[0]),
         _ => None,
     }
 }

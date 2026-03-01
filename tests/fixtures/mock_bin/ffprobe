@@ -10,8 +10,8 @@ if [ "${1:-}" = "-version" ]; then
     exit 0
 fi
 
-# Get the file being probed (last argument)
-file="${!#}"
+# Get the file being probed (last argument, POSIX-safe)
+for file; do :; done
 
 # Branch on extension for image vs audio/video responses
 case "$file" in

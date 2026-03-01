@@ -571,84 +571,75 @@ fn resolve_field_typed<'a>(entry: &'a MediaEntry, path: &str) -> FieldValue<'a> 
         "probe.backend" => FieldValue::Str(Cow::Borrowed(&entry.probe.backend)),
         "probe.took_ms" => FieldValue::Num(entry.probe.took_ms as f64),
 
-        // media.exif.*
-        "media.exif.camera_make" => match entry.media.exif {
-            Some(ref e) => match e.camera_make {
-                Some(ref v) => FieldValue::Str(Cow::Borrowed(v)),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.camera_model" => match entry.media.exif {
-            Some(ref e) => match e.camera_model {
-                Some(ref v) => FieldValue::Str(Cow::Borrowed(v)),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.lens_model" => match entry.media.exif {
-            Some(ref e) => match e.lens_model {
-                Some(ref v) => FieldValue::Str(Cow::Borrowed(v)),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.focal_length_mm" => match entry.media.exif {
-            Some(ref e) => match e.focal_length_mm {
-                Some(v) => FieldValue::Num(v),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.aperture" => match entry.media.exif {
-            Some(ref e) => match e.aperture {
-                Some(v) => FieldValue::Num(v),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.exposure_time" => match entry.media.exif {
-            Some(ref e) => match e.exposure_time {
-                Some(ref v) => FieldValue::Str(Cow::Borrowed(v)),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.iso" => match entry.media.exif {
-            Some(ref e) => match e.iso {
-                Some(v) => FieldValue::Num(f64::from(v)),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.date_taken" => match entry.media.exif {
-            Some(ref e) => match e.date_taken {
-                Some(ref v) => FieldValue::Str(Cow::Borrowed(v)),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.gps_latitude" => match entry.media.exif {
-            Some(ref e) => match e.gps_latitude {
-                Some(v) => FieldValue::Num(v),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.gps_longitude" => match entry.media.exif {
-            Some(ref e) => match e.gps_longitude {
-                Some(v) => FieldValue::Num(v),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
-        "media.exif.orientation" => match entry.media.exif {
-            Some(ref e) => match e.orientation {
-                Some(v) => FieldValue::Num(f64::from(v)),
-                None => FieldValue::Null,
-            },
-            None => FieldValue::Null,
-        },
+        // media.exif.* — string fields
+        "media.exif.camera_make" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.camera_make.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.camera_model" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.camera_model.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.lens_model" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.lens_model.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.exposure_time" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.exposure_time.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.exif.date_taken" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.date_taken.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        // media.exif.* — numeric fields (f64)
+        "media.exif.focal_length_mm" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.focal_length_mm)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        "media.exif.aperture" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.aperture)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        "media.exif.gps_latitude" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.gps_latitude)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        "media.exif.gps_longitude" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.gps_longitude)
+            .map_or(FieldValue::Null, FieldValue::Num),
+        // media.exif.* — numeric fields (u32 → f64)
+        "media.exif.iso" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.iso)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(f64::from(v))),
+        "media.exif.orientation" => entry
+            .media
+            .exif
+            .as_ref()
+            .and_then(|e| e.orientation)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(f64::from(v))),
 
         // Convenience aliases (top-level shortcuts for common fields)
         "duration_ms" => resolve_field_typed(entry, "media.duration_ms"),
