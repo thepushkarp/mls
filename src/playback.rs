@@ -82,6 +82,8 @@ impl MpvController {
             cmd.arg("--no-video");
         }
         cmd.arg("--really-quiet");
+        cmd.arg("--no-input-terminal");
+        cmd.stdin(std::process::Stdio::null());
         cmd.arg(path);
 
         let child = cmd.spawn().context("failed to start mpv")?;
