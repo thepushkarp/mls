@@ -1,6 +1,6 @@
 # mls — Media LS
 
-Terminal-native audio/video file browser with metadata columns, TUI preview, and structured JSON output.
+Terminal-native audio/video/image file browser with metadata columns, TUI preview, and structured JSON output.
 
 Think `fd` meets `ffprobe` meets `lazygit`.
 
@@ -118,7 +118,7 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 | `s` | Cycle sort key (name → size → date → duration → resolution → codec → bitrate) |
 | `S` | Reverse sort direction |
 | `i` | Toggle metadata panel |
-| `1` / `2` / `3` | Kind filter: All / Video / Audio |
+| `1` / `2` / `3` / `4` | Kind filter: All / Video / Audio / Image |
 | `Space` | Mark/unmark file |
 | `?` | Help overlay |
 
@@ -128,8 +128,8 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 |-----|--------|
 | `p` | Play/pause current file via mpv |
 | `P` | Stop playback |
-| `]` | Seek forward 5s |
-| `[` | Seek backward 5s |
+| `]` | Seek forward 10s |
+| `[` | Seek backward 10s |
 
 ### Triage mode
 
@@ -173,10 +173,13 @@ mls --filter 'extension == "mp4" || extension == "mkv"'    # specific formats
 
 **Field paths** (dot-separated, resolved against the `MediaEntry` JSON schema):
 - `duration_ms`, `extension`, `path`
-- `media.kind` (`"video"`, `"audio"`, `"av"`)
+- `media.kind` (`"video"`, `"audio"`, `"av"`, `"image"`)
 - `media.video.width`, `media.video.height`, `media.video.codec.name`
-- `media.audio.codec.name`, `media.audio.channels`, `media.audio.channel_layout`, `media.audio.sample_rate`
-- `fs.size`, `fs.modified`
+- `media.audio.codec.name`, `media.audio.channels`, `media.audio.channel_layout`, `media.audio.sample_rate_hz`
+- `media.exif.camera_make`, `media.exif.camera_model`, `media.exif.lens_model`, `media.exif.focal_length_mm`, `media.exif.aperture`, `media.exif.exposure_time`, `media.exif.iso`, `media.exif.date_taken`, `media.exif.gps_latitude`, `media.exif.gps_longitude`, `media.exif.orientation`
+- `fs.size_bytes`, `fs.modified_at`, `fs.created_at`
+
+**Shorthand aliases**: `duration_ms`, `size_bytes`, `kind`, `width`, `height`, `bitrate` / `bitrate_bps`, `camera` (→ `media.exif.camera_model`), `iso` (→ `media.exif.iso`)
 
 ## Sort keys
 
@@ -205,29 +208,31 @@ Version: `0.1.0`
 
 ```jsonc
 {
+  "type": "mls.list",
   "schema_version": "0.1.0",
+  "mls_version": "0.1.0",
+  "generated_at": "2025-12-01T12:00:00Z",
   "entries": [
     {
       "path": "/Users/me/Videos/clip.mp4",
       "extension": "mp4",
-      "duration_ms": 125400,
       "media": {
         "kind": "av",
+        "duration_ms": 125400,
         "video": {
           "width": 1920, "height": 1080,
           "codec": { "name": "h264", "profile": "High", "level": "4.1" },
           "fps": { "num": 24000, "den": 1001 },
-          "bitrate": 5200000
+          "bitrate_bps": 5200000
         },
         "audio": {
           "codec": { "name": "aac", "profile": "LC" },
-          "channels": 2, "channel_layout": "stereo", "sample_rate": 48000,
-          "bitrate": 128000
+          "channels": 2, "channel_layout": "stereo", "sample_rate_hz": 48000,
+          "bitrate_bps": 128000
         }
       },
-      "fs": { "size": 81920000, "modified": "2025-12-01T10:30:00Z" },
-      "tags": { "title": "My Clip", "artist": null, "album": null },
-      "probe": { "backend": "ffprobe", "latency_ms": 42 }
+      "fs": { "size_bytes": 81920000, "modified_at": "2025-12-01T10:30:00Z", "created_at": "2025-11-30T08:00:00Z" },
+      "probe": { "backend": "ffprobe", "took_ms": 42 }
     }
   ],
   "summary": {
@@ -243,9 +248,9 @@ Version: `0.1.0`
 One JSON object per line, streamed as files are probed:
 
 ```
-{"type":"header","schema_version":"0.1.0"}
-{"type":"entry","entry":{...}}
-{"type":"footer","summary":{...},"errors":[]}
+{"type":"mls.header","schema_version":"0.1.0","mls_version":"0.1.0","generated_at":"2025-12-01T12:00:00Z"}
+{"type":"mls.entry","entry":{...}}
+{"type":"mls.footer","summary":{...},"errors":[]}
 ```
 
 ## Exit codes
@@ -262,6 +267,8 @@ One JSON object per line, streamed as files are probed:
 **Video**: mp4, mkv, mov, avi, wmv, flv, webm, m4v, mpg, mpeg, ts, mts, m2ts, vob, ogv, 3gp, 3g2
 
 **Audio**: mp3, flac, wav, aac, ogg, opus, wma, m4a, aiff, aif, alac, ape, dsf, dff, wv, mka
+
+**Image**: jpg, jpeg, png, webp, gif, bmp, tiff, tif
 
 ## Development
 
@@ -282,7 +289,7 @@ cargo build --release
 
 v0.1.0-dev — functional but pre-release. See the [PRD](docs/plans/resilient-gliding-bear.md) for the full roadmap.
 
-**Working**: TUI browser with Miller column navigation, JSON/NDJSON output, filter expressions (structured + fuzzy), sort, playback (mpv), triage (keep/delete/move), thumbnail preview, metadata inspection, integration tests.
+**Working**: TUI browser with Miller column navigation, JSON/NDJSON output, filter expressions (structured + fuzzy), sort, playback (mpv), triage (keep/delete/move), thumbnail preview, metadata inspection, image support with EXIF metadata extraction, integration tests.
 
 **Planned**: Linux support, interactive directory picker for triage move.
 

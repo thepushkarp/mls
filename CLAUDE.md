@@ -2,7 +2,7 @@
 
 ## What is this
 
-mls (Media LS) — terminal-native audio/video file browser. Dual-mode: TUI for humans, JSON/NDJSON for scripts/agents. Rust + Ratatui + Tokio. macOS-first.
+mls (Media LS) — terminal-native audio/video/image file browser. Dual-mode: TUI for humans, JSON/NDJSON for scripts/agents. Rust + Ratatui + Tokio. macOS-first.
 
 PRD: `docs/plans/resilient-gliding-bear.md`
 
@@ -25,13 +25,14 @@ src/
 ├── cli.rs         # clap derive CLI definitions
 ├── types.rs       # ALL shared types (MediaEntry, MediaInfo, Fps, etc.)
 ├── deps.rs        # Startup dependency check (ffprobe, ffmpeg, mpv)
-├── probe.rs       # ffprobe subprocess + JSON parsing → MediaEntry
+├── probe.rs       # ffprobe subprocess + JSON parsing → MediaEntry (image detection + EXIF dispatch)
+├── exif.rs        # EXIF metadata extraction (kamadak-exif)
 ├── scan.rs        # Directory walk + concurrent probing (JoinSet)
 ├── filter.rs      # Hand-rolled expression parser (lexer → parser → AST → eval)
 ├── sort.rs        # Sort key parsing + comparison
 ├── output.rs      # JSON/NDJSON serialization (borrowing, zero-clone)
 ├── playback.rs    # mpv subprocess + Unix IPC socket control
-├── thumbnail.rs   # ffmpeg thumbnail gen + LRU cache
+├── thumbnail.rs   # Thumbnail gen: ffmpeg for video, direct loading for images (no cache for images)
 └── tui/
     ├── mod.rs     # App state, event loop, key handling, directory navigation
     ├── layout.rs  # Ratatui rendering — three-pane Miller columns (parent/files/preview)
@@ -43,13 +44,13 @@ src/
 
 1. `cli.rs` parses args → `main.rs` routes to subcommand
 2. `deps.rs` checks ffprobe/ffmpeg/mpv availability
-3. `scan.rs` walks directories → `probe.rs` runs ffprobe per file → `MediaEntry`
+3. `scan.rs` walks directories → `probe.rs` runs ffprobe per file → `MediaEntry` (images bypass ffprobe stream classification; EXIF extracted via `exif.rs`)
 4. Filter (`filter.rs`) and sort (`sort.rs`) applied to entries
 5. Output: `tui/` renders interactively, or `output.rs` emits JSON/NDJSON
 
 ### Key type: `MediaEntry` (in `types.rs`)
 
-The central data type. Every module reads or produces it. It serializes to the JSON schema (version `0.1.0`). If you change `MediaEntry`, you affect JSON output, TUI rendering, filter evaluation, and sort comparison.
+The central data type. Every module reads or produces it. It serializes to the JSON schema (version `0.1.0`). If you change `MediaEntry`, you affect JSON output, TUI rendering, filter evaluation, and sort comparison. `MediaKind` includes a `Image` variant. `MediaInfo` has an optional `exif: Option<ExifInfo>` field populated for image files.
 
 ## Conventions
 
@@ -99,6 +100,8 @@ JSON output uses borrowing structs (`ListEnvelopeRef<'a>`, `NdjsonEntryRef<'a>`)
 - **TUI has two filter modes**: `/` opens fuzzy (nucleo-matcher), prefix `=` switches to structured field expressions using the same parser as `--filter`.
 - `triage.rs` Move (`m` key) works via text input; interactive directory picker not yet built.
 - `scan.rs` uses bounded `JoinSet` spawns (not a semaphore) for concurrency control, with `mpsc` channel for streaming results to the caller.
+- Images are loaded directly in `thumbnail.rs` (bypass ffmpeg + LRU cache).
+- `filter.rs` supports `media.exif.*` field paths and `camera`/`iso` shorthand aliases.
 
 ## Dependencies (external)
 
