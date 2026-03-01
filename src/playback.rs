@@ -276,3 +276,51 @@ impl Drop for MpvController {
         let _ = std::fs::remove_file(&self.socket_path);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_state_is_stopped() {
+        let ctrl = MpvController::new();
+        assert_eq!(ctrl.state(), PlaybackState::Stopped);
+    }
+
+    #[test]
+    fn new_current_file_is_none() {
+        let ctrl = MpvController::new();
+        assert!(ctrl.current_file().is_none());
+    }
+
+    #[test]
+    fn new_is_alive_false() {
+        let mut ctrl = MpvController::new();
+        assert!(!ctrl.is_alive());
+    }
+
+    #[test]
+    fn socket_path_contains_pid() {
+        let ctrl = MpvController::new();
+        let pid = std::process::id().to_string();
+        assert!(
+            ctrl.socket_path.to_string_lossy().contains(&pid),
+            "socket_path {:?} should contain pid {pid}",
+            ctrl.socket_path
+        );
+    }
+
+    #[test]
+    fn two_controllers_different_paths() {
+        let a = MpvController::new();
+        let b = MpvController::new();
+        assert_ne!(a.socket_path, b.socket_path);
+    }
+
+    #[test]
+    fn default_equals_new() {
+        let from_default = MpvController::default();
+        let from_new = MpvController::new();
+        assert_eq!(from_default.state(), from_new.state());
+    }
+}

@@ -133,3 +133,174 @@ pub fn write_info_json<W: Write>(writer: &mut W, entries: &[MediaEntry]) -> Resu
     writer.flush().context("failed to flush info JSON")?;
     Ok(())
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::types::{
+        ContainerInfo, FsInfo, MediaEntry, MediaInfo, MediaKind, MediaTags, ProbeError, ProbeInfo,
+    };
+    use std::borrow::Cow;
+    use std::path::PathBuf;
+
+    fn make_entry() -> MediaEntry {
+        MediaEntry {
+            file_name: "test.mp4".to_string(),
+            path: PathBuf::from("/test/test.mp4"),
+            extension: "mp4".to_string(),
+            fs: FsInfo {
+                size_bytes: 1000,
+                modified_at: None,
+                created_at: None,
+            },
+            media: MediaInfo {
+                kind: MediaKind::Video,
+                container: ContainerInfo {
+                    format_name: "mp4".to_string(),
+                    format_primary: "mp4".to_string(),
+                },
+                duration_ms: None,
+                overall_bitrate_bps: None,
+                video: None,
+                audio: None,
+                streams: vec![],
+                tags: MediaTags::default(),
+            },
+            probe: ProbeInfo {
+                backend: Cow::Borrowed("ffprobe"),
+                took_ms: 0,
+                error: None,
+            },
+        }
+    }
+
+    fn make_error() -> ProbeError {
+        ProbeError {
+            path: PathBuf::from("/bad.mp4"),
+            error: "timeout".to_string(),
+        }
+    }
+
+    #[test]
+    fn slice_is_empty_true() {
+        assert!(slice_is_empty(&&[][..]));
+    }
+
+    #[test]
+    fn slice_is_empty_false() {
+        assert!(!slice_is_empty(&&[make_error()][..]));
+    }
+
+    #[test]
+    fn write_json_empty_entries_valid() {
+        let mut buf = Vec::new();
+        write_json(&mut buf, &[], &[]).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(val["type"], "mls.list");
+        assert_eq!(val["schema_version"], "0.1.0");
+        assert_eq!(val["summary"]["entries_total"], 0);
+    }
+
+    #[test]
+    fn write_json_with_entries_and_errors() {
+        let entries = vec![make_entry()];
+        let errors = vec![make_error()];
+        let mut buf = Vec::new();
+        write_json(&mut buf, &entries, &errors).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(val["summary"]["entries_total"], 2);
+        assert_eq!(val["entries"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn write_json_errors_omitted_when_empty() {
+        let mut buf = Vec::new();
+        write_json(&mut buf, &[], &[]).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        let obj = val.as_object().unwrap();
+        assert!(obj.get("errors").is_none());
+    }
+
+    #[test]
+    fn write_json_errors_present_when_nonempty() {
+        let errors = vec![make_error()];
+        let mut buf = Vec::new();
+        write_json(&mut buf, &[], &errors).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        let obj = val.as_object().unwrap();
+        assert!(obj.get("errors").is_some());
+    }
+
+    #[test]
+    fn write_json_has_mls_version() {
+        let mut buf = Vec::new();
+        write_json(&mut buf, &[], &[]).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        let ver = val["mls_version"].as_str().unwrap();
+        assert!(!ver.is_empty());
+    }
+
+    #[test]
+    fn write_json_has_generated_at() {
+        let mut buf = Vec::new();
+        write_json(&mut buf, &[], &[]).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        let ts = val["generated_at"].as_str().unwrap();
+        assert!(!ts.is_empty());
+    }
+
+    #[test]
+    fn write_ndjson_header_type() {
+        let mut buf = Vec::new();
+        write_ndjson_header(&mut buf).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(val["type"], "mls.header");
+    }
+
+    #[test]
+    fn write_ndjson_entry_type() {
+        let entry = make_entry();
+        let mut buf = Vec::new();
+        write_ndjson_entry(&mut buf, &entry).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(val["type"], "mls.entry");
+    }
+
+    #[test]
+    fn write_ndjson_footer_type() {
+        let summary = ListSummary::default();
+        let mut buf = Vec::new();
+        write_ndjson_footer(&mut buf, &summary, &[]).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(val["type"], "mls.footer");
+    }
+
+    #[test]
+    fn write_ndjson_footer_errors_omitted_when_empty() {
+        let summary = ListSummary::default();
+        let mut buf = Vec::new();
+        write_ndjson_footer(&mut buf, &summary, &[]).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        let obj = val.as_object().unwrap();
+        assert!(obj.get("errors").is_none());
+    }
+
+    #[test]
+    fn write_info_json_single_not_array() {
+        let entries = vec![make_entry()];
+        let mut buf = Vec::new();
+        write_info_json(&mut buf, &entries).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert!(val.is_object());
+    }
+
+    #[test]
+    fn write_info_json_multiple_as_array() {
+        let entries = vec![make_entry(), make_entry()];
+        let mut buf = Vec::new();
+        write_info_json(&mut buf, &entries).unwrap();
+        let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert!(val.is_array());
+    }
+}

@@ -188,3 +188,78 @@ fn dirs_cache_xdg() -> PathBuf {
     });
     PathBuf::from(cache).join("mls").join("thumbnails")
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stable_hash_deterministic() {
+        let path = Path::new("/test/a.mp4");
+        assert_eq!(stable_path_hash(path), stable_path_hash(path));
+    }
+
+    #[test]
+    fn stable_hash_same_path() {
+        let path = Path::new("/videos/clip.mkv");
+        let first = stable_path_hash(path);
+        let second = stable_path_hash(path);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn stable_hash_different_paths() {
+        let a = stable_path_hash(Path::new("/a.mp4"));
+        let b = stable_path_hash(Path::new("/b.mp4"));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn stable_hash_known_value() {
+        // Empty path hashes no bytes, so result is the FNV offset basis.
+        let hash = stable_path_hash(Path::new(""));
+        assert_eq!(hash, 0xcbf2_9ce4_8422_2325);
+    }
+
+    #[test]
+    fn cache_zero_capacity_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = ThumbnailCache::new(0, dir.path().to_path_buf());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cache_creates_dir_if_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let subdir = dir.path().join("new_subdir");
+        assert!(!subdir.exists());
+        let _cache = ThumbnailCache::new(10, subdir.clone()).unwrap();
+        assert!(subdir.exists());
+    }
+
+    #[test]
+    fn default_cache_dir_nonempty() {
+        assert!(!default_cache_dir().to_string_lossy().is_empty());
+    }
+
+    #[test]
+    fn default_cache_dir_contains_mls() {
+        assert!(default_cache_dir().to_string_lossy().contains("mls"));
+    }
+
+    #[test]
+    fn disk_cache_path_ends_in_jpg() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ThumbnailCache::new(5, dir.path().to_path_buf()).unwrap();
+        let path = cache.disk_cache_path(Path::new("test.mp4"));
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("jpg"));
+        // Stem should be 16 hex characters
+        let stem = path.file_stem().unwrap().to_string_lossy();
+        assert_eq!(stem.len(), 16, "stem {stem:?} should be 16 hex chars");
+        assert!(
+            stem.chars().all(|c| c.is_ascii_hexdigit()),
+            "stem {stem:?} should be all hex digits"
+        );
+    }
+}

@@ -105,8 +105,8 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 | `k` / `↑` | Move up |
 | `g` | Jump to top |
 | `G` | Jump to bottom |
-| `Ctrl-d` | Page down (10) |
-| `Ctrl-u` | Page up (10) |
+| `Ctrl-d` | Page down (half screen) |
+| `Ctrl-u` | Page up (half screen) |
 | `Enter` | Open file (macOS `open`) |
 
 ### Features
@@ -260,7 +260,7 @@ One JSON object per line, streamed as files are probed:
 
 ```bash
 cargo build                   # debug build
-cargo test                    # 158 unit tests (~0.01s)
+cargo test
 cargo clippy --all-targets --all-features -- -D warnings  # zero warnings
 cargo fmt --check             # formatting
 ```

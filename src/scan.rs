@@ -55,6 +55,7 @@ fn walk_dir(
 
     // Use device+inode for cycle detection (avoids realpath syscall)
     let Ok(meta) = std::fs::metadata(dir) else {
+        tracing::warn!("failed to read metadata for {}, skipping", dir.display());
         return;
     };
     let dir_id = (meta.dev(), meta.ino());
@@ -64,12 +65,17 @@ fn walk_dir(
     }
 
     let Ok(entries) = std::fs::read_dir(dir) else {
+        tracing::warn!("failed to read directory {}, skipping", dir.display());
         return;
     };
 
     for entry in entries.flatten() {
         // Use entry.file_type() (from readdir d_type) to avoid extra stat syscall
         let Ok(ft) = entry.file_type() else {
+            tracing::warn!(
+                "failed to read file type for {}, skipping",
+                entry.path().display()
+            );
             continue;
         };
         let path = entry.path();
@@ -254,5 +260,33 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert!(files[0].ends_with("track.flac"));
+    }
+
+    #[test]
+    fn max_depth_zero_scans_root_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        fs::write(root.join("file.mp4"), b"fake").unwrap();
+        let subdir = root.join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        fs::write(subdir.join("deep.mp4"), b"fake").unwrap();
+
+        let files = discover_media_files(&[root.to_path_buf()], Some(0));
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("file.mp4"));
+    }
+
+    #[test]
+    fn discover_single_file_directly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let file_path = root.join("test.mp4");
+        fs::write(&file_path, b"fake").unwrap();
+
+        let files = discover_media_files(&[file_path], None);
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("test.mp4"));
     }
 }

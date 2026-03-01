@@ -10,7 +10,7 @@ PRD: `docs/plans/resilient-gliding-bear.md`
 
 ```bash
 cargo build                   # debug build
-cargo test                    # 158 unit tests, ~0.01s
+cargo test
 cargo clippy --all-targets --all-features -- -D warnings  # MUST be zero warnings
 cargo fmt --check             # formatting check
 ```
@@ -31,14 +31,12 @@ src/
 ├── sort.rs        # Sort key parsing + comparison
 ├── output.rs      # JSON/NDJSON serialization (borrowing, zero-clone)
 ├── playback.rs    # mpv subprocess + Unix IPC socket control
-├── thumbnail.rs   # ffmpeg thumbnail gen + LRU cache (not yet wired to TUI)
+├── thumbnail.rs   # ffmpeg thumbnail gen + LRU cache
 └── tui/
     ├── mod.rs     # App state, event loop, key handling
     ├── layout.rs  # Ratatui rendering — three-pane Miller columns
     ├── triage.rs  # Triage mode state + key handling
-    ├── input.rs   # Placeholder (future multi-key sequences)
-    ├── preview.rs # Placeholder (future ratatui-image integration)
-    └── widgets.rs # Placeholder (future custom widgets)
+    └── preview.rs # Thumbnail rendering in preview pane
 ```
 
 ### Data flow
@@ -96,10 +94,8 @@ JSON output uses borrowing structs (`ListEnvelopeRef<'a>`, `NdjsonEntryRef<'a>`)
 
 ## Gotchas
 
-- `filter.rs` uses a hand-rolled recursive descent parser. No parser combinator library. The eval serializes `MediaEntry` to `serde_json::Value` then resolves dot-separated field paths.
-- `thumbnail.rs` and `playback.rs::get_position()` have `#[expect(dead_code)]` — they work but aren't wired to the TUI yet.
-- TUI `open_file()` hardcodes macOS `open` command. No Linux `xdg-open` yet.
-- `triage.rs` `Move` variant exists but the directory picker isn't implemented.
+- `filter.rs` uses a hand-rolled recursive descent parser. No parser combinator library. The eval resolves dot-separated field paths via typed struct access (FieldValue enum), without JSON serialization.
+- `triage.rs` Move works via text input; interactive directory picker not yet built.
 - `scan.rs` uses bounded `JoinSet` spawns (not a semaphore) for concurrency control.
 
 ## Dependencies (external)

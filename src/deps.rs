@@ -83,3 +83,95 @@ fn probe_version(cmd: &str, args: &[&str]) -> Option<String> {
             }
         })
 }
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hard_deps_ok_all_present() {
+        let dc = DepCheck {
+            ffprobe: Some("7.0".into()),
+            ffmpeg: Some("7.0".into()),
+            mpv: Some("0.38".into()),
+        };
+        assert!(dc.hard_deps_ok());
+    }
+
+    #[test]
+    fn hard_deps_ok_ffprobe_missing() {
+        let dc = DepCheck {
+            ffprobe: None,
+            ffmpeg: Some("7.0".into()),
+            mpv: Some("0.38".into()),
+        };
+        assert!(!dc.hard_deps_ok());
+    }
+
+    #[test]
+    fn hard_deps_ok_ffmpeg_missing() {
+        let dc = DepCheck {
+            ffprobe: Some("7.0".into()),
+            ffmpeg: None,
+            mpv: Some("0.38".into()),
+        };
+        assert!(!dc.hard_deps_ok());
+    }
+
+    #[test]
+    fn hard_deps_ok_both_missing() {
+        let dc = DepCheck {
+            ffprobe: None,
+            ffmpeg: None,
+            mpv: Some("0.38".into()),
+        };
+        assert!(!dc.hard_deps_ok());
+    }
+
+    #[test]
+    fn missing_message_all_present_returns_none() {
+        let dc = DepCheck {
+            ffprobe: Some("7.0".into()),
+            ffmpeg: Some("7.0".into()),
+            mpv: Some("0.38".into()),
+        };
+        assert!(dc.missing_message().is_none());
+    }
+
+    #[test]
+    fn missing_message_hard_missing_has_error() {
+        let dc = DepCheck {
+            ffprobe: None,
+            ffmpeg: Some("7.0".into()),
+            mpv: Some("0.38".into()),
+        };
+        let msg = dc.missing_message().unwrap();
+        assert!(msg.contains("Error:"));
+        assert!(!msg.contains("Warning:"));
+    }
+
+    #[test]
+    fn missing_message_only_mpv_missing_has_warning() {
+        let dc = DepCheck {
+            ffprobe: Some("7.0".into()),
+            ffmpeg: Some("7.0".into()),
+            mpv: None,
+        };
+        let msg = dc.missing_message().unwrap();
+        assert!(msg.contains("Warning:"));
+        assert!(!msg.contains("Error:"));
+    }
+
+    #[test]
+    fn missing_message_all_missing_has_both() {
+        let dc = DepCheck {
+            ffprobe: None,
+            ffmpeg: None,
+            mpv: None,
+        };
+        let msg = dc.missing_message().unwrap();
+        assert!(msg.contains("Error:"));
+        assert!(msg.contains("Warning:"));
+    }
+}

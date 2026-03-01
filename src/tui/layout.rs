@@ -14,6 +14,7 @@ use std::borrow::Cow;
 /// Main render function — lays out all panes.
 pub fn render(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
+    app.terminal_height = size.height;
 
     // Top-level: main area + footer
     let outer = Layout::default()
@@ -900,6 +901,28 @@ mod tests {
         assert_eq!(bar, "[]");
     }
 
+    #[test]
+    fn truncate_zero_max_len() {
+        assert_eq!(truncate("abc", 0), "");
+    }
+
+    // --- Progress bar edge cases ---
+
+    #[test]
+    fn format_progress_bar_width_zero() {
+        assert_eq!(format_progress_bar(50.0, 100.0, 0), "[]");
+    }
+
+    #[test]
+    fn format_progress_bar_width_one() {
+        assert_eq!(format_progress_bar(50.0, 100.0, 1), "[]");
+    }
+
+    #[test]
+    fn format_progress_bar_width_three() {
+        assert_eq!(format_progress_bar(0.0, 100.0, 3), "[>]");
+    }
+
     // --- format_seconds ---
 
     #[test]
@@ -915,5 +938,15 @@ mod tests {
     #[test]
     fn format_seconds_hours() {
         assert_eq!(format_seconds(3723.0), "1:02:03");
+    }
+
+    #[test]
+    fn format_seconds_negative() {
+        assert_eq!(format_seconds(-5.0), "0:00");
+    }
+
+    #[test]
+    fn format_seconds_large_hours() {
+        assert_eq!(format_seconds(7323.0), "2:02:03");
     }
 }

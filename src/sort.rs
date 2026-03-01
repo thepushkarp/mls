@@ -38,6 +38,9 @@ pub fn parse_sort_spec(spec: &str) -> Option<(SortKey, SortDir)> {
 }
 
 /// Sort entries in place by the given key and direction.
+///
+/// For optional fields (Modified, Duration, Bitrate), `None` sorts before
+/// `Some` in ascending order (via `Option`'s derived `Ord`).
 pub fn sort_entries(entries: &mut [MediaEntry], key: SortKey, dir: SortDir) {
     if key == SortKey::Name {
         // Cache lowercased keys: one allocation per entry instead of two per comparison
@@ -59,7 +62,7 @@ pub fn sort_entries(entries: &mut [MediaEntry], key: SortKey, dir: SortDir) {
 fn compare_by_key(a: &MediaEntry, b: &MediaEntry, key: SortKey) -> std::cmp::Ordering {
     match key {
         SortKey::Path => a.path.cmp(&b.path),
-        SortKey::Name => a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()),
+        SortKey::Name => a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()), // Unreachable: sort_entries handles Name via sort_by_cached_key before calling compare_by_key
         SortKey::Size => a.fs.size_bytes.cmp(&b.fs.size_bytes),
         SortKey::Modified => a.fs.modified_at.cmp(&b.fs.modified_at),
         SortKey::Duration => a.media.duration_ms.cmp(&b.media.duration_ms),
@@ -389,5 +392,16 @@ mod tests {
         sort_entries(&mut entries, SortKey::Name, SortDir::Asc);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].file_name, "solo.mp4");
+    }
+
+    #[test]
+    fn sort_duration_none_before_some() {
+        let mut entries = vec![
+            make_entry_with("has_duration.mp4", 100, Some(60_000)),
+            make_entry_with("no_duration.mp4", 100, None),
+        ];
+        sort_entries(&mut entries, SortKey::Duration, SortDir::Asc);
+        assert_eq!(entries[0].file_name, "no_duration.mp4");
+        assert_eq!(entries[1].file_name, "has_duration.mp4");
     }
 }

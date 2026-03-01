@@ -1136,4 +1136,40 @@ mod tests {
         let f = Filter::parse("media.video.width > \"9\"").unwrap();
         assert!(f.matches(&entry).unwrap());
     }
+
+    // --- NOT with compound expressions ---
+
+    #[test]
+    fn eval_not_compound_expression() {
+        let entry = make_entry();
+        // Inner: 1920 > 1920 is false, so AND is false, NOT false = true
+        let f = Filter::parse("!(width > 1920 && extension == \"mkv\")").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_not_compound_when_inner_true() {
+        let mut entry = make_entry();
+        entry.media.video.as_mut().unwrap().width = 3840;
+        entry.extension = "mkv".to_string();
+        // Inner: 3840 > 1920 is true AND ext=="mkv" is true, NOT true = false
+        let f = Filter::parse("!(width > 1920 && extension == \"mkv\")").unwrap();
+        assert!(!f.matches(&entry).unwrap());
+    }
+
+    // --- Additional shorthand alias tests ---
+
+    #[test]
+    fn eval_shorthand_height() {
+        let entry = make_entry();
+        let f = Filter::parse("height == 1080").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
+
+    #[test]
+    fn eval_shorthand_bitrate_alias() {
+        let entry = make_entry();
+        let f = Filter::parse("bitrate == 5000000").unwrap();
+        assert!(f.matches(&entry).unwrap());
+    }
 }

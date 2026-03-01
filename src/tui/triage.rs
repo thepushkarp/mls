@@ -479,6 +479,24 @@ mod tests {
         assert!(msg.contains("already exists"));
     }
 
+    #[test]
+    fn remove_last_entry_clamps_cursor() {
+        let entry = make_entry(PathBuf::from("/test/video.mp4"));
+        let mut app = make_triage_app(vec![entry]);
+        // Remove the only entry — should not panic
+        app.remove_selected_entry();
+        assert_eq!(app.visible_count(), 0);
+    }
+
+    #[test]
+    fn triage_history_push_pop_roundtrip() {
+        let mut state = TriageState::new(5);
+        state.history.push(TriageAction::Keep { index: 0 });
+        let action = state.history.pop().unwrap();
+        assert!(matches!(action, TriageAction::Keep { .. }));
+        assert_eq!(state.history.len(), 0);
+    }
+
     #[tokio::test]
     async fn execute_move_rejects_non_directory() {
         let src_dir = tempfile::tempdir().unwrap();

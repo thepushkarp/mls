@@ -2,11 +2,9 @@
 ///
 /// Uses ratatui with crossterm backend. Immediate-mode rendering with
 /// buffer diffing for minimal terminal I/O.
-pub mod input;
 pub mod layout;
 pub mod preview;
 pub mod triage;
-pub mod widgets;
 
 use crate::filter::Filter;
 use crate::playback::{MpvController, PlaybackState};
@@ -148,6 +146,8 @@ pub struct App {
     playback_duration: Option<f64>,
     /// File name currently being played (for display).
     playback_file_name: Option<String>,
+    /// Terminal height in rows (updated each frame from layout).
+    pub terminal_height: u16,
 }
 
 impl App {
@@ -201,6 +201,7 @@ impl App {
             playback_position: None,
             playback_duration: None,
             playback_file_name: None,
+            terminal_height: 24,
         }
     }
 
@@ -597,7 +598,10 @@ pub async fn run(
 ) -> Result<()> {
     // Scan media files
     let current_dir = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
-    let current_dir = std::fs::canonicalize(&current_dir).unwrap_or(current_dir);
+    let current_dir = std::fs::canonicalize(&current_dir).unwrap_or_else(|e| {
+        tracing::warn!("failed to canonicalize path: {e}");
+        current_dir
+    });
 
     let (mut entries, errors) = scan::scan_all(paths, max_depth, concurrency, timeout_ms).await?;
 
@@ -705,6 +709,7 @@ async fn event_loop(
     Ok(())
 }
 
+#[expect(clippy::too_many_lines, reason = "match arms for key handling")]
 async fn handle_key(app: &mut App, key: KeyEvent) {
     // Handle filter input mode
     if app.filter_active {
@@ -746,8 +751,12 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
         (KeyCode::Char('k') | KeyCode::Up, _) => app.move_up(),
         (KeyCode::Char('g'), _) => app.move_top(),
         (KeyCode::Char('G'), _) => app.move_bottom(),
-        (KeyCode::Char('d'), KeyModifiers::CONTROL) => app.page_down(10),
-        (KeyCode::Char('u'), KeyModifiers::CONTROL) => app.page_up(10),
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
+            app.page_down((app.terminal_height / 2) as usize);
+        }
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+            app.page_up((app.terminal_height / 2) as usize);
+        }
         // Actions
         (KeyCode::Char('/'), _) => {
             app.filter_active = true;
@@ -1317,5 +1326,69 @@ mod tests {
         let mut app = make_test_app(&[]);
         app.kick_thumbnail_fetch();
         assert!(matches!(app.thumb_state, ThumbState::Empty));
+    }
+
+    #[test]
+    fn toggle_mark_on_dir_is_noop() {
+        let mut app = make_test_app(&["a.mp4"]);
+        app.dir_items = vec![PathBuf::from("/d")];
+        app.selected = 0;
+        app.toggle_mark();
+        assert!(app.marked.is_empty());
+    }
+
+    #[test]
+    fn page_down_at_bottom_stays() {
+        let mut app = make_test_app(&["a.mp4", "b.mp4", "c.mp4"]);
+        app.selected = 2;
+        app.page_down(10);
+        assert_eq!(app.selected, 2);
+    }
+
+    #[test]
+    fn page_down_advances_by_size() {
+        let names: Vec<&str> = vec![
+            "a.mp4", "b.mp4", "c.mp4", "d.mp4", "e.mp4", "f.mp4", "g.mp4", "h.mp4", "i.mp4",
+            "j.mp4",
+        ];
+        let mut app = make_test_app(&names);
+        app.selected = 0;
+        app.page_down(3);
+        assert_eq!(app.selected, 3);
+    }
+
+    #[test]
+    fn page_up_at_top_stays() {
+        let mut app = make_test_app(&["a.mp4", "b.mp4"]);
+        app.selected = 0;
+        app.page_up(10);
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn page_up_retreats_by_size() {
+        let names: Vec<&str> = vec![
+            "a.mp4", "b.mp4", "c.mp4", "d.mp4", "e.mp4", "f.mp4", "g.mp4", "h.mp4", "i.mp4",
+            "j.mp4",
+        ];
+        let mut app = make_test_app(&names);
+        app.selected = 5;
+        app.page_up(3);
+        assert_eq!(app.selected, 2);
+    }
+
+    #[test]
+    fn cycle_sort_advances_key() {
+        let mut app = make_test_app(&["a.mp4", "b.mp4"]);
+        let initial = app.sort_key;
+        app.cycle_sort();
+        assert_eq!(app.sort_key, initial.next());
+    }
+
+    #[test]
+    fn cycle_sort_sets_status() {
+        let mut app = make_test_app(&["a.mp4"]);
+        app.cycle_sort();
+        assert!(app.status_message.is_some());
     }
 }
