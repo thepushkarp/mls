@@ -1,5 +1,7 @@
 # mls — Media LS
 
+![Crates.io](https://img.shields.io/crates/d/media-ls)
+
 Terminal-native audio/video/image file browser with metadata columns, TUI preview, and structured JSON output.
 
 Think `fd` meets `ffprobe` meets `lazygit`.
