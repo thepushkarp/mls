@@ -2,7 +2,7 @@
 
 ## What is this
 
-mls (Media LS) — terminal-native audio/video/image file browser. Dual-mode: TUI for humans, JSON/NDJSON for scripts/agents. Rust + Ratatui + Tokio. macOS-first.
+mls (Media LS) — terminal-native audio/video/image/document file browser. Dual-mode: TUI for humans, JSON/NDJSON for scripts/agents. Rust + Ratatui + Tokio. macOS-first.
 
 PRD: `docs/plans/resilient-gliding-bear.md`
 
@@ -25,9 +25,10 @@ src/
 ├── cli.rs         # clap derive CLI definitions
 ├── types.rs       # ALL shared types (MediaEntry, MediaInfo, Fps, etc.)
 ├── deps.rs        # Startup dependency check (ffprobe, ffmpeg, mpv)
-├── probe.rs       # ffprobe subprocess + JSON parsing → MediaEntry (image detection + EXIF dispatch)
+├── probe.rs       # ffprobe subprocess + JSON parsing → MediaEntry (image detection + EXIF dispatch; document dispatch)
 ├── exif.rs        # EXIF metadata extraction (kamadak-exif)
-├── scan.rs        # Directory walk + concurrent probing (JoinSet)
+├── document.rs    # Document metadata extraction (PDF, OOXML, ODF, OLE2, text) — pure Rust, no external tools
+├── scan.rs        # Directory walk + concurrent probing (JoinSet) — routes documents to native probe
 ├── filter.rs      # Hand-rolled expression parser (lexer → parser → AST → eval)
 ├── sort.rs        # Sort key parsing + comparison
 ├── output.rs      # JSON/NDJSON serialization (borrowing, zero-clone)
@@ -44,13 +45,13 @@ src/
 
 1. `cli.rs` parses args → `main.rs` routes to subcommand
 2. `deps.rs` checks ffprobe/ffmpeg/mpv availability
-3. `scan.rs` walks directories → `probe.rs` runs ffprobe per file → `MediaEntry` (images bypass ffprobe stream classification; EXIF extracted via `exif.rs`)
+3. `scan.rs` walks directories → `probe.rs` runs ffprobe per file → `MediaEntry` (images bypass ffprobe stream classification; EXIF extracted via `exif.rs`; documents bypass ffprobe entirely → `document.rs` extracts metadata natively)
 4. Filter (`filter.rs`) and sort (`sort.rs`) applied to entries
 5. Output: `tui/` renders interactively, or `output.rs` emits JSON/NDJSON
 
 ### Key type: `MediaEntry` (in `types.rs`)
 
-The central data type. Every module reads or produces it. It serializes to the JSON schema (version `0.1.0`). If you change `MediaEntry`, you affect JSON output, TUI rendering, filter evaluation, and sort comparison. `MediaKind` includes a `Image` variant. `MediaInfo` has an optional `exif: Option<ExifInfo>` field populated for image files.
+The central data type. Every module reads or produces it. It serializes to the JSON schema (version `0.2.0`). If you change `MediaEntry`, you affect JSON output, TUI rendering, filter evaluation, and sort comparison. `MediaKind` variants: `Video`, `Audio`, `Av`, `Image`, `Document`. `MediaInfo` has optional `exif: Option<ExifInfo>` (images) and `doc: Option<DocumentInfo>` (documents) fields.
 
 ## Conventions
 
@@ -84,7 +85,7 @@ Unit tests are co-located `#[cfg(test)]` modules at the bottom of each source fi
 
 ### Output format
 
-JSON output uses borrowing structs (`ListEnvelopeRef<'a>`, `NdjsonEntryRef<'a>`) to avoid cloning `MediaEntry` vectors. Schema version `"0.1.0"` is embedded in output.
+JSON output uses borrowing structs (`ListEnvelopeRef<'a>`, `NdjsonEntryRef<'a>`) to avoid cloning `MediaEntry` vectors. Schema version `"0.2.0"` is embedded in output.
 
 ### External processes
 
@@ -101,7 +102,9 @@ JSON output uses borrowing structs (`ListEnvelopeRef<'a>`, `NdjsonEntryRef<'a>`)
 - `triage.rs` Move (`m` key) works via text input; interactive directory picker not yet built.
 - `scan.rs` uses bounded `JoinSet` spawns (not a semaphore) for concurrency control, with `mpsc` channel for streaming results to the caller.
 - Images are loaded directly in `thumbnail.rs` (bypass ffmpeg + LRU cache).
-- `filter.rs` supports `media.exif.*` field paths and `camera`/`iso` shorthand aliases.
+- `filter.rs` supports `media.exif.*` field paths and `camera`/`iso` shorthand aliases, plus `media.doc.*` field paths and `pages`/`author` shorthand aliases.
+- **Documents bypass ffprobe entirely** — probed by `document.rs` using pure Rust crates (`lopdf`, `zip`, `quick-xml`, `cfb`). Recognized extensions: pdf, docx, doc, odt, xlsx, xls, ods, pptx, ppt, odp, csv, tsv, txt, md.
+- **TUI kind filter key `5`** filters to documents. Document entries show "D" icon in file list.
 
 ## Dependencies (external)
 

@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::io::Write;
 
-const SCHEMA_VERSION: &str = "0.1.0";
+const SCHEMA_VERSION: &str = "0.2.0";
 const MLS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Borrowing envelope for JSON serialization (avoids cloning entries).
@@ -167,6 +167,7 @@ mod tests {
                 streams: vec![],
                 tags: MediaTags::default(),
                 exif: None,
+                doc: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
@@ -199,7 +200,7 @@ mod tests {
         write_json(&mut buf, &[], &[]).unwrap();
         let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
         assert_eq!(val["type"], "mls.list");
-        assert_eq!(val["schema_version"], "0.1.0");
+        assert_eq!(val["schema_version"], "0.2.0");
         assert_eq!(val["summary"]["entries_total"], 0);
     }
 

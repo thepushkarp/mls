@@ -186,6 +186,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
                     MediaKind::Video | MediaKind::Av => "V",
                     MediaKind::Audio => "A",
                     MediaKind::Image => "I",
+                    MediaKind::Document => "D",
                 };
 
                 let resolution = entry.media.video.as_ref().map_or_else(
@@ -513,6 +514,54 @@ fn render_metadata_text(frame: &mut Frame, entry: &crate::types::MediaEntry, are
         }
     }
 
+    if let Some(ref doc) = entry.media.doc {
+        lines.push(Line::from(""));
+        lines.push(Line::styled(
+            "── Document ──",
+            Style::default().fg(Color::Blue),
+        ));
+        lines.push(Line::from(vec![
+            Span::styled("Format: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(&doc.format),
+        ]));
+        if let Some(pages) = doc.page_count {
+            lines.push(Line::from(vec![
+                Span::styled("Pages: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{pages}")),
+            ]));
+        }
+        if let Some(words) = doc.word_count {
+            lines.push(Line::from(vec![
+                Span::styled("Words: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{words}")),
+            ]));
+        }
+        if let Some(line_count) = doc.line_count {
+            lines.push(Line::from(vec![
+                Span::styled("Lines: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{line_count}")),
+            ]));
+        }
+        if let Some(sheets) = doc.sheet_count {
+            lines.push(Line::from(vec![
+                Span::styled("Sheets: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{sheets}")),
+            ]));
+        }
+        if let Some(ref author) = doc.author {
+            lines.push(Line::from(vec![
+                Span::styled("Author: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(author),
+            ]));
+        }
+        if let Some(ref title) = doc.title {
+            lines.push(Line::from(vec![
+                Span::styled("Title: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(title),
+            ]));
+        }
+    }
+
     let preview = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(preview, area);
 }
@@ -705,7 +754,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let keys = if app.triage.is_some() {
         "[y] keep  [n] delete  [m] move  [u] undo  [q] quit triage"
     } else {
-        "[j/k] nav  [Enter] open  [p] play  [/] filter  [1/2/3/4] kind  [s] sort  [t] triage  [?] help"
+        "[j/k] nav  [Enter] open  [p] play  [/] filter  [1-5] kind  [s] sort  [t] triage  [?] help"
     };
     let keybindings = Paragraph::new(Line::styled(keys, Style::default().fg(Color::DarkGray)));
     frame.render_widget(keybindings, footer_layout[1]);
@@ -732,7 +781,7 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::styled("Actions", Style::default().add_modifier(Modifier::BOLD)),
         Line::from("  /            Fuzzy filter (prefix = for structured)"),
-        Line::from("  1/2/3/4      Filter: All/Video/Audio/Image"),
+        Line::from("  1/2/3/4/5    Filter: All/Video/Audio/Image/Doc"),
         Line::from("  s/S          Cycle sort / reverse"),
         Line::from("  i            Toggle metadata panel"),
         Line::from("  Space        Mark/unmark file"),

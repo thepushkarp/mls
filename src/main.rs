@@ -4,6 +4,7 @@
 /// output for scripts and AI agents. Think `fd` meets `ffprobe` meets `lazygit`.
 mod cli;
 mod deps;
+mod document;
 mod exif;
 mod filter;
 mod output;
@@ -218,7 +219,16 @@ async fn run_ndjson(cli: &Cli, paths: &[std::path::PathBuf]) -> Result<()> {
 async fn run_info(cli: &Cli, files: &[std::path::PathBuf]) -> Result<()> {
     let mut entries = Vec::new();
     for file in files {
-        match probe::probe_file(file, cli.timeout_ms).await {
+        let is_doc = file
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(types::is_document_extension);
+        let result = if is_doc {
+            probe::probe_document_file(file).await
+        } else {
+            probe::probe_file(file, cli.timeout_ms).await
+        };
+        match result {
             Ok(entry) => entries.push(entry),
             Err(e) => {
                 tracing::error!(path = %file.display(), "error probing file: {e}");

@@ -21,6 +21,7 @@ pub fn parse_sort_spec(spec: &str) -> Option<(SortKey, SortDir)> {
         "resolution" => SortKey::Resolution,
         "codec" => SortKey::Codec,
         "bitrate" => SortKey::Bitrate,
+        "pages" | "page_count" => SortKey::Pages,
         _ => return None,
     };
     let dir = match dir_str {
@@ -100,6 +101,11 @@ fn compare_by_key(a: &MediaEntry, b: &MediaEntry, key: SortKey) -> std::cmp::Ord
             .media
             .overall_bitrate_bps
             .cmp(&b.media.overall_bitrate_bps),
+        SortKey::Pages => {
+            let pages_a = a.media.doc.as_ref().and_then(|d| d.page_count);
+            let pages_b = b.media.doc.as_ref().and_then(|d| d.page_count);
+            pages_a.cmp(&pages_b)
+        }
     }
 }
 
@@ -137,6 +143,7 @@ mod tests {
                 streams: vec![],
                 tags: MediaTags::default(),
                 exif: None,
+                doc: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
@@ -231,6 +238,8 @@ mod tests {
             "resolution",
             "codec",
             "bitrate",
+            "pages",
+            "page_count",
         ];
         for key in keys {
             assert!(

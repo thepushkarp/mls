@@ -48,6 +48,8 @@ pub enum KindFilter {
     Audio,
     /// Show only image files.
     Image,
+    /// Show only document files.
+    Document,
 }
 
 impl KindFilter {
@@ -59,6 +61,7 @@ impl KindFilter {
             Self::Video => "Video",
             Self::Audio => "Audio",
             Self::Image => "Image",
+            Self::Document => "Document",
         }
     }
 }
@@ -273,6 +276,7 @@ impl App {
             KindFilter::Video => matches!(entry.media.kind, MediaKind::Video | MediaKind::Av),
             KindFilter::Audio => matches!(entry.media.kind, MediaKind::Audio),
             KindFilter::Image => matches!(entry.media.kind, MediaKind::Image),
+            KindFilter::Document => matches!(entry.media.kind, MediaKind::Document),
         }
     }
 
@@ -811,6 +815,11 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             app.apply_filter();
             app.set_status("Filter: Image".to_string());
         }
+        (KeyCode::Char('5'), _) => {
+            app.kind_filter = KindFilter::Document;
+            app.apply_filter();
+            app.set_status("Filter: Document".to_string());
+        }
         // Playback
         (KeyCode::Char('p'), _) => handle_playback(app).await,
         (KeyCode::Char('P'), _) => {
@@ -994,6 +1003,7 @@ mod tests {
                 streams: vec![],
                 tags: MediaTags::default(),
                 exif: None,
+                doc: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
