@@ -37,32 +37,27 @@ pub enum FilterMode {
     Structured,
 }
 
-/// Media kind pre-filter (1/2/3/4 keys).
+/// Media kind multi-select filter (1=all, 2-5 toggle individual kinds).
+#[expect(clippy::struct_excessive_bools, reason = "one bool per UI checkbox")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KindFilter {
-    /// Show all media types.
-    All,
-    /// Show only video/av files.
-    Video,
-    /// Show only audio-only files (no video stream).
-    Audio,
-    /// Show only image files.
-    Image,
-    /// Show only document files.
-    Document,
+pub struct KindFilter {
+    pub video: bool,
+    pub audio: bool,
+    pub image: bool,
+    pub doc: bool,
 }
 
 impl KindFilter {
-    /// Label for display in the footer.
+    pub const ALL: Self = Self {
+        video: true,
+        audio: true,
+        image: true,
+        doc: true,
+    };
+
     #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::Video => "Video",
-            Self::Audio => "Audio",
-            Self::Image => "Image",
-            Self::Document => "Document",
-        }
+    pub fn is_empty(self) -> bool {
+        !self.video && !self.audio && !self.image && !self.doc
     }
 }
 
@@ -206,7 +201,7 @@ impl App {
             dir_scanning: false,
             scan_concurrency,
             scan_timeout_ms,
-            kind_filter: KindFilter::All,
+            kind_filter: KindFilter::ALL,
             filter_mode: FilterMode::Fuzzy,
             filter_expr: None,
             playback_position: None,
@@ -271,12 +266,11 @@ impl App {
 
     /// Check if an entry matches the current kind filter.
     fn matches_kind(&self, entry: &MediaEntry) -> bool {
-        match self.kind_filter {
-            KindFilter::All => true,
-            KindFilter::Video => matches!(entry.media.kind, MediaKind::Video | MediaKind::Av),
-            KindFilter::Audio => matches!(entry.media.kind, MediaKind::Audio),
-            KindFilter::Image => matches!(entry.media.kind, MediaKind::Image),
-            KindFilter::Document => matches!(entry.media.kind, MediaKind::Document),
+        match entry.media.kind {
+            MediaKind::Video | MediaKind::Av => self.kind_filter.video,
+            MediaKind::Audio => self.kind_filter.audio,
+            MediaKind::Image => self.kind_filter.image,
+            MediaKind::Document => self.kind_filter.doc,
         }
     }
 
@@ -796,29 +790,36 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
         }
         // Kind filter
         (KeyCode::Char('1'), _) => {
-            app.kind_filter = KindFilter::All;
+            app.kind_filter = KindFilter::ALL;
             app.apply_filter();
-            app.set_status("Filter: All".to_string());
         }
         (KeyCode::Char('2'), _) => {
-            app.kind_filter = KindFilter::Video;
+            app.kind_filter.video = !app.kind_filter.video;
             app.apply_filter();
-            app.set_status("Filter: Video".to_string());
+            if app.kind_filter.is_empty() {
+                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
+            }
         }
         (KeyCode::Char('3'), _) => {
-            app.kind_filter = KindFilter::Audio;
+            app.kind_filter.audio = !app.kind_filter.audio;
             app.apply_filter();
-            app.set_status("Filter: Audio".to_string());
+            if app.kind_filter.is_empty() {
+                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
+            }
         }
         (KeyCode::Char('4'), _) => {
-            app.kind_filter = KindFilter::Image;
+            app.kind_filter.image = !app.kind_filter.image;
             app.apply_filter();
-            app.set_status("Filter: Image".to_string());
+            if app.kind_filter.is_empty() {
+                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
+            }
         }
         (KeyCode::Char('5'), _) => {
-            app.kind_filter = KindFilter::Document;
+            app.kind_filter.doc = !app.kind_filter.doc;
             app.apply_filter();
-            app.set_status("Filter: Document".to_string());
+            if app.kind_filter.is_empty() {
+                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
+            }
         }
         // Playback
         (KeyCode::Char('p'), _) => handle_playback(app).await,
@@ -1182,7 +1183,12 @@ mod tests {
             5000,
         );
 
-        app.kind_filter = KindFilter::Video;
+        app.kind_filter = KindFilter {
+            video: true,
+            audio: false,
+            image: false,
+            doc: false,
+        };
         app.apply_filter();
 
         // Video filter matches MediaKind::Video and MediaKind::Av (2 entries).
@@ -1209,7 +1215,12 @@ mod tests {
         );
 
         // Audio filter matches only MediaKind::Audio (1 entry).
-        app.kind_filter = KindFilter::Audio;
+        app.kind_filter = KindFilter {
+            video: false,
+            audio: true,
+            image: false,
+            doc: false,
+        };
         app.apply_filter();
         assert_eq!(app.filtered_indices.len(), 1);
     }
@@ -1217,7 +1228,7 @@ mod tests {
     #[test]
     fn kind_filter_all_shows_everything() {
         let mut app = make_test_app(&["a.mp4", "b.mkv", "c.mp3"]);
-        app.kind_filter = KindFilter::All;
+        app.kind_filter = KindFilter::ALL;
         app.apply_filter();
         assert_eq!(app.filtered_indices.len(), 3);
     }
@@ -1243,11 +1254,79 @@ mod tests {
         );
 
         // Video kind filter + fuzzy "alpha" → only alpha.mp4 passes both predicates.
-        app.kind_filter = KindFilter::Video;
+        app.kind_filter = KindFilter {
+            video: true,
+            audio: false,
+            image: false,
+            doc: false,
+        };
         app.filter_text = "alpha".to_string();
         app.apply_filter();
         assert_eq!(app.filtered_indices.len(), 1);
         assert_eq!(app.entries[app.filtered_indices[0]].file_name, "alpha.mp4");
+    }
+
+    #[test]
+    fn kind_filter_multi_select() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+            make_entry_with_kind("photo.jpg", MediaKind::Image),
+            make_entry_with_kind("doc.pdf", MediaKind::Document),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        // Video + audio enabled, image + doc disabled.
+        app.kind_filter = KindFilter {
+            video: true,
+            audio: true,
+            image: false,
+            doc: false,
+        };
+        app.apply_filter();
+        assert_eq!(app.filtered_indices.len(), 2);
+    }
+
+    #[test]
+    fn kind_filter_empty_shows_nothing() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        // All kinds disabled → empty list.
+        app.kind_filter = KindFilter {
+            video: false,
+            audio: false,
+            image: false,
+            doc: false,
+        };
+        app.apply_filter();
+        assert!(app.filtered_indices.is_empty());
+        assert!(app.kind_filter.is_empty());
     }
 
     #[test]

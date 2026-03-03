@@ -732,21 +732,32 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Red),
         )
     } else {
-        let kind_label = app.kind_filter.label();
-        Line::styled(
-            format!(
-                "{}/{} files │ Sort: {} │ [{}]",
-                if app.visible_count() == 0 {
-                    0
-                } else {
-                    app.selected + 1
-                },
-                app.visible_count(),
-                app.sort_key.label(),
-                kind_label,
-            ),
-            Style::default().fg(Color::DarkGray),
-        )
+        let prefix = format!(
+            "{}/{} files \u{2502} Sort: {} \u{2502} ",
+            if app.visible_count() == 0 {
+                0
+            } else {
+                app.selected + 1
+            },
+            app.visible_count(),
+            app.sort_key.label(),
+        );
+        let kf = &app.kind_filter;
+        let check = |on: bool| if on { "\u{2713}" } else { " " };
+        let dim = Style::default().fg(Color::DarkGray);
+        let spans = vec![
+            Span::styled(prefix, dim),
+            Span::styled("V[", dim),
+            Span::raw(check(kf.video)),
+            Span::styled("] A[", dim),
+            Span::raw(check(kf.audio)),
+            Span::styled("] I[", dim),
+            Span::raw(check(kf.image)),
+            Span::styled("] D[", dim),
+            Span::raw(check(kf.doc)),
+            Span::styled("]", dim),
+        ];
+        Line::from(spans)
     };
     frame.render_widget(Paragraph::new(status), footer_layout[0]);
 
@@ -754,7 +765,7 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let keys = if app.triage.is_some() {
         "[y] keep  [n] delete  [m] move  [u] undo  [q] quit triage"
     } else {
-        "[j/k] nav  [Enter] open  [p] play  [/] filter  [1-5] kind  [s] sort  [t] triage  [?] help"
+        "[j/k] nav  [Enter] open  [p] play  [/] filter  [1] all  [2-5] kind  [s] sort  [t] triage  [?] help"
     };
     let keybindings = Paragraph::new(Line::styled(keys, Style::default().fg(Color::DarkGray)));
     frame.render_widget(keybindings, footer_layout[1]);
@@ -781,7 +792,8 @@ fn render_help_overlay(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::styled("Actions", Style::default().add_modifier(Modifier::BOLD)),
         Line::from("  /            Fuzzy filter (prefix = for structured)"),
-        Line::from("  1/2/3/4/5    Filter: All/Video/Audio/Image/Doc"),
+        Line::from("  1            Show all kinds"),
+        Line::from("  2/3/4/5      Toggle Video/Audio/Image/Doc"),
         Line::from("  s/S          Cycle sort / reverse"),
         Line::from("  i            Toggle metadata panel"),
         Line::from("  Space        Mark/unmark file"),
