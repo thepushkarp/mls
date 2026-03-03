@@ -161,10 +161,7 @@ fn render_file_list(frame: &mut Frame, app: &App, area: Rect) {
             if vis_idx < dir_count {
                 // Directory item
                 let dir = &app.dir_items[vis_idx];
-                let name = dir
-                    .file_name()
-                    .map_or_else(|| ".".to_string(), |n| n.to_string_lossy().into_owned());
-                let line = format!("  D {name}/");
+                let line = format!("  D {}/", dir.name);
                 let style = if is_selected {
                     Style::default()
                         .bg(Color::DarkGray)

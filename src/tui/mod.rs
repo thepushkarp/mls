@@ -9,9 +9,9 @@ pub mod triage;
 use crate::filter::Filter;
 use crate::playback::{MpvController, PlaybackState};
 use crate::scan;
-use crate::sort::sort_entries;
+use crate::sort::{sort_dir_items, sort_entries};
 use crate::thumbnail::ThumbnailCache;
-use crate::types::{MediaEntry, MediaKind, ProbeError, SortDir, SortKey};
+use crate::types::{DirItem, MediaEntry, MediaKind, ProbeError, SortDir, SortKey};
 use anyhow::{Context, Result};
 use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -132,8 +132,8 @@ pub struct App {
     filter_mode: FilterMode,
     /// Last successfully parsed structured filter expression.
     filter_expr: Option<Filter>,
-    /// Subdirectories of `current_dir`, sorted alphabetically.
-    dir_items: Vec<PathBuf>,
+    /// Subdirectories of `current_dir`, sorted by current sort key.
+    dir_items: Vec<DirItem>,
     /// Cached sibling directories (for parent pane rendering).
     sibling_dirs: Vec<PathBuf>,
     /// Receiver for async directory scan results.
@@ -226,11 +226,11 @@ impl App {
             .and_then(|&idx| self.entries.get(idx))
     }
 
-    /// Get the currently selected directory (if any).
+    /// Get the currently selected directory path (if any).
     #[must_use]
     pub fn selected_dir(&self) -> Option<&PathBuf> {
         if self.selected < self.dir_items.len() {
-            Some(&self.dir_items[self.selected])
+            Some(&self.dir_items[self.selected].path)
         } else {
             None
         }
@@ -328,8 +328,9 @@ impl App {
         }
     }
 
-    /// Apply current sort to entries and rebuild indices.
+    /// Apply current sort to entries and dir items, then rebuild indices.
     fn apply_sort(&mut self) {
+        sort_dir_items(&mut self.dir_items, self.sort_key, self.sort_dir);
         sort_entries(&mut self.entries, self.sort_key, self.sort_dir);
         self.apply_filter();
     }
@@ -513,6 +514,7 @@ impl App {
     /// Navigate to a directory: load subdirs, clear state, spawn async scan.
     fn navigate_to_dir(&mut self, path: PathBuf) {
         self.dir_items = list_subdirs(&path);
+        sort_dir_items(&mut self.dir_items, self.sort_key, self.sort_dir);
         self.sibling_dirs = list_sibling_dirs(&path);
 
         // Clear media state (but NOT mpv playback — per spec)
@@ -578,23 +580,51 @@ impl App {
     }
 }
 
-/// List subdirectories of a path, sorted alphabetically.
-fn list_subdirs(path: &std::path::Path) -> Vec<PathBuf> {
+/// List subdirectories of a path as `DirItem`s, sorted alphabetically by name.
+fn list_subdirs(path: &std::path::Path) -> Vec<DirItem> {
     let Ok(entries) = std::fs::read_dir(path) else {
         return vec![];
     };
-    let mut dirs: Vec<PathBuf> = entries
+    let mut dirs: Vec<DirItem> = entries
         .flatten()
-        .filter(|e| e.path().is_dir())
-        .map(|e| e.path())
+        .filter(|e| e.file_type().is_ok_and(|ft| ft.is_dir()))
+        .filter_map(|e| {
+            let path = e.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned())?;
+            let name_lower = name.to_lowercase();
+            let meta = e.metadata().ok();
+            let size_bytes = meta.as_ref().map_or(0, std::fs::Metadata::len);
+            let modified_at = meta.as_ref().and_then(|m| m.modified().ok());
+            Some(DirItem {
+                path,
+                name,
+                name_lower,
+                size_bytes,
+                modified_at,
+            })
+        })
         .collect();
-    dirs.sort();
+    dirs.sort_by(|a, b| a.name_lower.cmp(&b.name_lower));
     dirs
 }
 
 /// List sibling directories (dirs in parent) for the parent pane.
+///
+/// Returns plain `PathBuf`s since the parent pane is always alphabetical.
 fn list_sibling_dirs(path: &std::path::Path) -> Vec<PathBuf> {
-    path.parent().map_or_else(Vec::new, list_subdirs)
+    let Some(parent) = path.parent() else {
+        return vec![];
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return vec![];
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|ft| ft.is_dir()))
+        .map(|e| e.path())
+        .collect();
+    dirs.sort();
+    dirs
 }
 
 /// Run the TUI application.
@@ -852,7 +882,7 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             {
                 let child = app.current_dir.clone();
                 app.navigate_to_dir(parent);
-                if let Some(idx) = app.dir_items.iter().position(|d| *d == child) {
+                if let Some(idx) = app.dir_items.iter().position(|d| d.path == child) {
                     app.selected = idx;
                 }
             }
@@ -1015,6 +1045,19 @@ mod tests {
                 took_ms: 10,
                 error: None,
             },
+        }
+    }
+
+    fn make_dir_item(path: &str) -> DirItem {
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map_or_else(|| ".".to_string(), |n| n.to_string_lossy().into_owned());
+        DirItem {
+            path: PathBuf::from(path),
+            name_lower: name.to_lowercase(),
+            name,
+            size_bytes: 0,
+            modified_at: None,
         }
     }
 
@@ -1344,8 +1387,8 @@ mod tests {
     fn selected_dir_returns_path_when_dir_selected() {
         let mut app = make_test_app(&["a.mp4"]);
         app.dir_items = vec![
-            PathBuf::from("/test/subdir1"),
-            PathBuf::from("/test/subdir2"),
+            make_dir_item("/test/subdir1"),
+            make_dir_item("/test/subdir2"),
         ];
         app.selected = 0;
         assert_eq!(app.selected_dir(), Some(&PathBuf::from("/test/subdir1")));
@@ -1355,7 +1398,7 @@ mod tests {
     #[test]
     fn selected_entry_offsets_correctly() {
         let mut app = make_test_app(&["a.mp4", "b.mkv"]);
-        app.dir_items = vec![PathBuf::from("/test/subdir")];
+        app.dir_items = vec![make_dir_item("/test/subdir")];
         // selected=0 → directory
         app.selected = 0;
         assert!(app.selected_entry().is_none());
@@ -1378,7 +1421,7 @@ mod tests {
     #[test]
     fn visible_count_includes_dirs() {
         let mut app = make_test_app(&["a.mp4"]);
-        app.dir_items = vec![PathBuf::from("/test/d1"), PathBuf::from("/test/d2")];
+        app.dir_items = vec![make_dir_item("/test/d1"), make_dir_item("/test/d2")];
         assert_eq!(app.visible_count(), 3); // 2 dirs + 1 media
     }
 
@@ -1408,10 +1451,7 @@ mod tests {
         std::fs::create_dir(root.join("middle")).unwrap();
 
         let dirs = super::list_subdirs(root);
-        let names: Vec<String> = dirs
-            .iter()
-            .map(|d| d.file_name().unwrap().to_string_lossy().into_owned())
-            .collect();
+        let names: Vec<&str> = dirs.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "middle", "zebra"]);
     }
 
@@ -1442,7 +1482,7 @@ mod tests {
     #[test]
     fn toggle_mark_on_dir_is_noop() {
         let mut app = make_test_app(&["a.mp4"]);
-        app.dir_items = vec![PathBuf::from("/d")];
+        app.dir_items = vec![make_dir_item("/d")];
         app.selected = 0;
         app.toggle_mark();
         assert!(app.marked.is_empty());

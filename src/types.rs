@@ -289,6 +289,18 @@ pub enum NdjsonRecord {
     },
 }
 
+/// Directory entry with cached metadata for sorting.
+#[derive(Debug, Clone)]
+pub struct DirItem {
+    pub path: PathBuf,
+    /// Display name (original case).
+    pub name: String,
+    /// Pre-lowercased name for case-insensitive sorting.
+    pub name_lower: String,
+    pub size_bytes: u64,
+    pub modified_at: Option<std::time::SystemTime>,
+}
+
 /// Sort key for media entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortKey {
@@ -317,6 +329,15 @@ impl SortKey {
             Self::Bitrate => "bitrate",
             Self::Pages => "pages",
         }
+    }
+
+    /// Whether this sort key applies to directories.
+    ///
+    /// Media-only keys (Duration, Resolution, Codec, Bitrate, Pages) return
+    /// `false` — callers should fall back to Name sort for dirs.
+    #[must_use]
+    pub fn applies_to_dirs(self) -> bool {
+        matches!(self, Self::Path | Self::Name | Self::Size | Self::Modified)
     }
 
     /// Cycle to next sort key.
