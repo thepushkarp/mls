@@ -258,9 +258,9 @@ impl App {
                 FilterMode::Structured => self.apply_structured_filter(&kind_indices),
             }
         }
-        // Keep selected index in bounds
-        if self.selected >= self.filtered_indices.len() {
-            self.selected = self.filtered_indices.len().saturating_sub(1);
+        // Keep selected index in bounds (dirs + media)
+        if self.selected >= self.visible_count() {
+            self.selected = self.visible_count().saturating_sub(1);
         }
     }
 
@@ -850,7 +850,11 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             if app.current_dir != app.root_dir
                 && let Some(parent) = app.current_dir.parent().map(std::path::Path::to_path_buf)
             {
+                let child = app.current_dir.clone();
                 app.navigate_to_dir(parent);
+                if let Some(idx) = app.dir_items.iter().position(|d| *d == child) {
+                    app.selected = idx;
+                }
             }
         }
         _ => {}
