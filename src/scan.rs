@@ -125,7 +125,15 @@ pub async fn probe_files(
             .is_some_and(is_document_extension);
         tasks.spawn(async move {
             let result = if is_doc {
-                probe::probe_document_file(&file).await
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(timeout_ms),
+                    probe::probe_document_file(&file),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    tracing::debug!(path = %file.display(), "document probe timed out");
+                    Err(anyhow::anyhow!("document probe timed out"))
+                })
             } else {
                 probe::probe_file(&file, timeout_ms).await
             };
