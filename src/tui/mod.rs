@@ -441,6 +441,15 @@ impl App {
         self.set_status(format!("Sort: {} {dir_label}", self.sort_key.label()));
     }
 
+    /// Toggle one kind in the filter, re-apply, and warn if nothing selected.
+    fn toggle_kind_filter(&mut self, toggle: fn(&mut KindFilter)) {
+        toggle(&mut self.kind_filter);
+        self.apply_filter();
+        if self.kind_filter.is_empty() {
+            self.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
+        }
+    }
+
     /// Start background thumbnail fetch for the currently selected entry.
     /// Skips if already loading the same path or if the file has no video.
     fn kick_thumbnail_fetch(&mut self) {
@@ -823,34 +832,10 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             app.kind_filter = KindFilter::ALL;
             app.apply_filter();
         }
-        (KeyCode::Char('2'), _) => {
-            app.kind_filter.video = !app.kind_filter.video;
-            app.apply_filter();
-            if app.kind_filter.is_empty() {
-                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
-            }
-        }
-        (KeyCode::Char('3'), _) => {
-            app.kind_filter.audio = !app.kind_filter.audio;
-            app.apply_filter();
-            if app.kind_filter.is_empty() {
-                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
-            }
-        }
-        (KeyCode::Char('4'), _) => {
-            app.kind_filter.image = !app.kind_filter.image;
-            app.apply_filter();
-            if app.kind_filter.is_empty() {
-                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
-            }
-        }
-        (KeyCode::Char('5'), _) => {
-            app.kind_filter.doc = !app.kind_filter.doc;
-            app.apply_filter();
-            if app.kind_filter.is_empty() {
-                app.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
-            }
-        }
+        (KeyCode::Char('2'), _) => app.toggle_kind_filter(|kf| kf.video = !kf.video),
+        (KeyCode::Char('3'), _) => app.toggle_kind_filter(|kf| kf.audio = !kf.audio),
+        (KeyCode::Char('4'), _) => app.toggle_kind_filter(|kf| kf.image = !kf.image),
+        (KeyCode::Char('5'), _) => app.toggle_kind_filter(|kf| kf.doc = !kf.doc),
         // Playback
         (KeyCode::Char('p'), _) => handle_playback(app).await,
         (KeyCode::Char('P'), _) => {

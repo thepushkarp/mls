@@ -98,7 +98,10 @@ fn read_xml_from_zip(path: &Path, inner_path: &str) -> Option<String> {
     let mut archive = zip::ZipArchive::new(file).ok()?;
     let entry = archive.by_name(inner_path).ok()?;
     let mut contents = String::new();
-    entry.take(MAX_XML_BYTES).read_to_string(&mut contents).ok()?;
+    entry
+        .take(MAX_XML_BYTES)
+        .read_to_string(&mut contents)
+        .ok()?;
     Some(contents)
 }
 
