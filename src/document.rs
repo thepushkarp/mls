@@ -136,36 +136,14 @@ fn parse_core_xml(xml: &str) -> OoxmlCoreProps {
         modified: None,
     };
 
-    let mut reader = quick_xml::Reader::from_str(xml);
-    let mut buf = Vec::new();
-    let mut current_tag = String::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(quick_xml::events::Event::Start(ref e) | quick_xml::events::Event::Empty(ref e)) => {
-                current_tag = local_name(e.name().as_ref());
-            }
-            Ok(quick_xml::events::Event::Text(ref e)) => {
-                let text = e.unescape().ok().map(|s| s.trim().to_owned());
-                if let Some(val) = text.filter(|s| !s.is_empty()) {
-                    match current_tag.as_str() {
-                        "creator" => props.author = Some(val),
-                        "title" => props.title = Some(val),
-                        "subject" => props.subject = Some(val),
-                        "created" => props.created = Some(val),
-                        "modified" => props.modified = Some(val),
-                        _ => {}
-                    }
-                }
-            }
-            Ok(quick_xml::events::Event::End(_)) => {
-                current_tag.clear();
-            }
-            Ok(quick_xml::events::Event::Eof) | Err(_) => break,
-            _ => {}
-        }
-        buf.clear();
-    }
+    parse_xml_text_fields(xml, |tag, val| match tag {
+        "creator" => props.author = Some(val),
+        "title" => props.title = Some(val),
+        "subject" => props.subject = Some(val),
+        "created" => props.created = Some(val),
+        "modified" => props.modified = Some(val),
+        _ => {}
+    });
 
     props
 }
@@ -178,35 +156,13 @@ fn parse_app_xml(xml: &str) -> OoxmlAppProps {
         app_name: None,
     };
 
-    let mut reader = quick_xml::Reader::from_str(xml);
-    let mut buf = Vec::new();
-    let mut current_tag = String::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(quick_xml::events::Event::Start(ref e) | quick_xml::events::Event::Empty(ref e)) => {
-                current_tag = local_name(e.name().as_ref());
-            }
-            Ok(quick_xml::events::Event::Text(ref e)) => {
-                let text = e.unescape().ok().map(|s| s.trim().to_owned());
-                if let Some(val) = text.filter(|s| !s.is_empty()) {
-                    match current_tag.as_str() {
-                        "Pages" => props.pages = val.parse().ok(),
-                        "Words" => props.words = val.parse().ok(),
-                        "Slides" => props.slides = val.parse().ok(),
-                        "Application" => props.app_name = Some(val),
-                        _ => {}
-                    }
-                }
-            }
-            Ok(quick_xml::events::Event::End(_)) => {
-                current_tag.clear();
-            }
-            Ok(quick_xml::events::Event::Eof) | Err(_) => break,
-            _ => {}
-        }
-        buf.clear();
-    }
+    parse_xml_text_fields(xml, |tag, val| match tag {
+        "Pages" => props.pages = val.parse().ok(),
+        "Words" => props.words = val.parse().ok(),
+        "Slides" => props.slides = val.parse().ok(),
+        "Application" => props.app_name = Some(val),
+        _ => {}
+    });
 
     props
 }
@@ -555,6 +511,41 @@ fn probe_text(path: &Path, ext: &str) -> Option<DocumentInfo> {
 }
 
 // ─── XML helpers ────────────────────────────────────────────────────────
+
+/// Run the `quick_xml` event loop and call `on_field` for each tag-text pair.
+///
+/// Shared by `parse_core_xml` and `parse_app_xml` which differ only in
+/// which tags they care about. Not used by `parse_odf_meta` which also
+/// reads attributes.
+fn parse_xml_text_fields(xml: &str, mut on_field: impl FnMut(&str, String)) {
+    use quick_xml::events::Event;
+
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let mut buf = Vec::new();
+    let mut current_tag = String::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
+                current_tag = local_name(e.name().as_ref());
+            }
+            Ok(Event::Text(ref e)) => {
+                if let Some(val) = e
+                    .unescape()
+                    .ok()
+                    .map(|s| s.trim().to_owned())
+                    .filter(|s| !s.is_empty())
+                {
+                    on_field(&current_tag, val);
+                }
+            }
+            Ok(Event::End(_)) => current_tag.clear(),
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
 
 /// Extract the local part of a possibly namespaced XML name.
 ///
