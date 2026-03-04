@@ -1,6 +1,6 @@
 [package]
 name = "media-ls"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "Media LS — terminal-native audio/video file browser with metadata columns, TUI preview, and structured JSON output"
 license = "MIT"
@@ -32,6 +32,10 @@ image = { version = "0.25.9", default-features = false, features = [
 kamadak-exif = "0.6.1"
 ratatui-image = { version = "10.0.6", default-features = false, features = ["crossterm"] }
 tokio = { version = "1.49.0", features = ["full"] }
+lopdf = { version = "0.39.0", default-features = false }
+zip = { version = "8.2.0", default-features = false, features = ["deflate"] }
+quick-xml = "0.37.5"
+cfb = "0.10.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 

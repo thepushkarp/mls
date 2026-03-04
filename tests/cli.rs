@@ -121,14 +121,14 @@ fn json_output_valid_schema() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(json["type"], "mls.list");
-    assert_eq!(json["schema_version"], "0.1.0");
+    assert_eq!(json["schema_version"], "0.2.0");
     assert!(json["entries"].is_array());
     assert!(json["summary"].is_object());
     assert!(json["summary"]["entries_total"].is_number());
 
     let entries = json["entries"].as_array().unwrap();
-    // Should find 5 media files (mp4, mkv, mp3, jpg, png) — not the .txt
-    assert_eq!(entries.len(), 5);
+    // 5 AV/image files (mp4, mkv, mp3, jpg, png) + 1 document (txt)
+    assert_eq!(entries.len(), 6);
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn ndjson_has_header_and_footer() {
 
     let header: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(header["type"], "mls.header");
-    assert_eq!(header["schema_version"], "0.1.0");
+    assert_eq!(header["schema_version"], "0.2.0");
 
     let footer: serde_json::Value = serde_json::from_str(lines.last().unwrap()).unwrap();
     assert_eq!(footer["type"], "mls.footer");
@@ -318,4 +318,83 @@ fn json_filter_kind_excludes_other_kinds() {
     assert_eq!(entries.len(), 1, "expected only 1 audio entry");
     assert_eq!(entries[0]["media"]["kind"], "audio");
     assert_eq!(entries[0]["extension"], "mp3");
+}
+
+// --- Document support ---
+
+#[test]
+fn json_documents_have_kind_document() {
+    let tmp = setup_media_dir();
+    let output = mls_cmd().arg("--json").arg(tmp.path()).output().unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+
+    let docs: Vec<&serde_json::Value> = entries
+        .iter()
+        .filter(|e| e["media"]["kind"] == "document")
+        .collect();
+
+    assert_eq!(docs.len(), 1, "expected 1 document entry (txt)");
+    assert_eq!(docs[0]["extension"], "txt");
+    assert_eq!(docs[0]["probe"]["backend"], "native");
+}
+
+#[test]
+fn json_filter_kind_document_returns_only_documents() {
+    let tmp = setup_media_dir();
+    let output = mls_cmd()
+        .arg("--json")
+        .arg("--filter")
+        .arg("kind == document")
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+
+    assert_eq!(entries.len(), 1, "expected only 1 document entry");
+    assert_eq!(entries[0]["media"]["kind"], "document");
+}
+
+#[test]
+fn json_document_has_line_count() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("notes.txt"),
+        b"line one\nline two\nline three\n",
+    )
+    .unwrap();
+
+    let output = mls_cmd().arg("--json").arg(tmp.path()).output().unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+
+    assert_eq!(entries.len(), 1);
+    let doc = &entries[0];
+    assert_eq!(doc["media"]["kind"], "document");
+    assert_eq!(doc["media"]["doc"]["format"], "txt");
+    assert_eq!(doc["media"]["doc"]["line_count"], 3);
+}
+
+#[test]
+fn json_sort_by_pages() {
+    let tmp = setup_media_dir();
+    let output = mls_cmd()
+        .arg("--json")
+        .arg("--sort")
+        .arg("pages")
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let entries = json["entries"].as_array().unwrap();
+    assert!(!entries.is_empty());
 }

@@ -1,7 +1,7 @@
-/// Sorting logic for media entries.
+/// Sorting logic for media entries and directory items.
 ///
 /// Supports sorting by all metadata fields with configurable direction.
-use crate::types::{MediaEntry, SortDir, SortKey};
+use crate::types::{DirItem, MediaEntry, SortDir, SortKey};
 
 /// Parse a sort specification string (e.g., "`duration_ms:desc`", "name:asc").
 ///
@@ -21,6 +21,7 @@ pub fn parse_sort_spec(spec: &str) -> Option<(SortKey, SortDir)> {
         "resolution" => SortKey::Resolution,
         "codec" => SortKey::Codec,
         "bitrate" => SortKey::Bitrate,
+        "pages" | "page_count" => SortKey::Pages,
         _ => return None,
     };
     let dir = match dir_str {
@@ -52,6 +53,29 @@ pub fn sort_entries(entries: &mut [MediaEntry], key: SortKey, dir: SortDir) {
     }
     entries.sort_by(|a, b| {
         let cmp = compare_by_key(a, b, key);
+        match dir {
+            SortDir::Asc => cmp,
+            SortDir::Desc => cmp.reverse(),
+        }
+    });
+}
+
+/// Sort directory items in place by the given key and direction.
+///
+/// Falls back to Name sort for media-only keys (Duration, Resolution, etc.).
+pub fn sort_dir_items(dirs: &mut [DirItem], key: SortKey, dir: SortDir) {
+    let effective_key = if key.applies_to_dirs() {
+        key
+    } else {
+        SortKey::Name
+    };
+    dirs.sort_by(|a, b| {
+        let cmp = match effective_key {
+            SortKey::Size => a.size_bytes.cmp(&b.size_bytes),
+            SortKey::Modified => a.modified_at.cmp(&b.modified_at),
+            // Name, Path, and any fallback: sort by lowercased name
+            _ => a.name_lower.cmp(&b.name_lower),
+        };
         match dir {
             SortDir::Asc => cmp,
             SortDir::Desc => cmp.reverse(),
@@ -100,6 +124,11 @@ fn compare_by_key(a: &MediaEntry, b: &MediaEntry, key: SortKey) -> std::cmp::Ord
             .media
             .overall_bitrate_bps
             .cmp(&b.media.overall_bitrate_bps),
+        SortKey::Pages => {
+            let pages_a = a.media.doc.as_ref().and_then(|d| d.page_count);
+            let pages_b = b.media.doc.as_ref().and_then(|d| d.page_count);
+            pages_a.cmp(&pages_b)
+        }
     }
 }
 
@@ -137,6 +166,7 @@ mod tests {
                 streams: vec![],
                 tags: MediaTags::default(),
                 exif: None,
+                doc: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
@@ -231,6 +261,8 @@ mod tests {
             "resolution",
             "codec",
             "bitrate",
+            "pages",
+            "page_count",
         ];
         for key in keys {
             assert!(
@@ -404,5 +436,90 @@ mod tests {
         sort_entries(&mut entries, SortKey::Duration, SortDir::Asc);
         assert_eq!(entries[0].file_name, "no_duration.mp4");
         assert_eq!(entries[1].file_name, "has_duration.mp4");
+    }
+
+    // --- sort_dir_items ---
+
+    fn make_dir_item(name: &str, size: u64, modified: Option<std::time::SystemTime>) -> DirItem {
+        DirItem {
+            path: PathBuf::from(format!("/test/{name}")),
+            name: name.to_string(),
+            name_lower: name.to_lowercase(),
+            size_bytes: size,
+            modified_at: modified,
+        }
+    }
+
+    #[test]
+    fn sort_dir_items_by_name_asc() {
+        let mut dirs = vec![
+            make_dir_item("Zebra", 0, None),
+            make_dir_item("alpha", 0, None),
+            make_dir_item("middle", 0, None),
+        ];
+        sort_dir_items(&mut dirs, SortKey::Name, SortDir::Asc);
+        let names: Vec<&str> = dirs.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["alpha", "middle", "Zebra"]);
+    }
+
+    #[test]
+    fn sort_dir_items_by_name_desc() {
+        let mut dirs = vec![
+            make_dir_item("alpha", 0, None),
+            make_dir_item("Zebra", 0, None),
+            make_dir_item("middle", 0, None),
+        ];
+        sort_dir_items(&mut dirs, SortKey::Name, SortDir::Desc);
+        let names: Vec<&str> = dirs.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["Zebra", "middle", "alpha"]);
+    }
+
+    #[test]
+    fn sort_dir_items_by_size_asc() {
+        let mut dirs = vec![
+            make_dir_item("big", 300, None),
+            make_dir_item("small", 100, None),
+            make_dir_item("medium", 200, None),
+        ];
+        sort_dir_items(&mut dirs, SortKey::Size, SortDir::Asc);
+        let sizes: Vec<u64> = dirs.iter().map(|d| d.size_bytes).collect();
+        assert_eq!(sizes, vec![100, 200, 300]);
+    }
+
+    #[test]
+    fn sort_dir_items_by_modified() {
+        use std::time::{Duration, SystemTime};
+        let t1 = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        let t2 = SystemTime::UNIX_EPOCH + Duration::from_secs(2000);
+        let t3 = SystemTime::UNIX_EPOCH + Duration::from_secs(3000);
+        let mut dirs = vec![
+            make_dir_item("newest", 0, Some(t3)),
+            make_dir_item("oldest", 0, Some(t1)),
+            make_dir_item("middle", 0, Some(t2)),
+        ];
+        sort_dir_items(&mut dirs, SortKey::Modified, SortDir::Asc);
+        let names: Vec<&str> = dirs.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["oldest", "middle", "newest"]);
+    }
+
+    #[test]
+    fn sort_dir_items_media_key_falls_back_to_name() {
+        let mut dirs = vec![
+            make_dir_item("Zebra", 0, None),
+            make_dir_item("alpha", 0, None),
+        ];
+        // Duration is media-only, should fall back to Name sort
+        sort_dir_items(&mut dirs, SortKey::Duration, SortDir::Asc);
+        let names: Vec<&str> = dirs.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["alpha", "Zebra"]);
+
+        // Codec too
+        let mut dirs2 = vec![
+            make_dir_item("Zebra", 0, None),
+            make_dir_item("alpha", 0, None),
+        ];
+        sort_dir_items(&mut dirs2, SortKey::Codec, SortDir::Asc);
+        let names2: Vec<&str> = dirs2.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names2, vec!["alpha", "Zebra"]);
     }
 }

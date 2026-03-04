@@ -9,9 +9,9 @@ pub mod triage;
 use crate::filter::Filter;
 use crate::playback::{MpvController, PlaybackState};
 use crate::scan;
-use crate::sort::sort_entries;
+use crate::sort::{sort_dir_items, sort_entries};
 use crate::thumbnail::ThumbnailCache;
-use crate::types::{MediaEntry, MediaKind, ProbeError, SortDir, SortKey};
+use crate::types::{DirItem, MediaEntry, MediaKind, ProbeError, SortDir, SortKey};
 use anyhow::{Context, Result};
 use crossterm::ExecutableCommand;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -37,29 +37,27 @@ pub enum FilterMode {
     Structured,
 }
 
-/// Media kind pre-filter (1/2/3/4 keys).
+/// Media kind multi-select filter (1=all, 2-5 toggle individual kinds).
+#[expect(clippy::struct_excessive_bools, reason = "one bool per UI checkbox")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KindFilter {
-    /// Show all media types.
-    All,
-    /// Show only video/av files.
-    Video,
-    /// Show only audio-only files (no video stream).
-    Audio,
-    /// Show only image files.
-    Image,
+pub struct KindFilter {
+    pub video: bool,
+    pub audio: bool,
+    pub image: bool,
+    pub doc: bool,
 }
 
 impl KindFilter {
-    /// Label for display in the footer.
+    pub const ALL: Self = Self {
+        video: true,
+        audio: true,
+        image: true,
+        doc: true,
+    };
+
     #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::Video => "Video",
-            Self::Audio => "Audio",
-            Self::Image => "Image",
-        }
+    pub fn is_empty(self) -> bool {
+        !self.video && !self.audio && !self.image && !self.doc
     }
 }
 
@@ -134,8 +132,8 @@ pub struct App {
     filter_mode: FilterMode,
     /// Last successfully parsed structured filter expression.
     filter_expr: Option<Filter>,
-    /// Subdirectories of `current_dir`, sorted alphabetically.
-    dir_items: Vec<PathBuf>,
+    /// Subdirectories of `current_dir`, sorted by current sort key.
+    dir_items: Vec<DirItem>,
     /// Cached sibling directories (for parent pane rendering).
     sibling_dirs: Vec<PathBuf>,
     /// Receiver for async directory scan results.
@@ -203,7 +201,7 @@ impl App {
             dir_scanning: false,
             scan_concurrency,
             scan_timeout_ms,
-            kind_filter: KindFilter::All,
+            kind_filter: KindFilter::ALL,
             filter_mode: FilterMode::Fuzzy,
             filter_expr: None,
             playback_position: None,
@@ -228,11 +226,11 @@ impl App {
             .and_then(|&idx| self.entries.get(idx))
     }
 
-    /// Get the currently selected directory (if any).
+    /// Get the currently selected directory path (if any).
     #[must_use]
     pub fn selected_dir(&self) -> Option<&PathBuf> {
         if self.selected < self.dir_items.len() {
-            Some(&self.dir_items[self.selected])
+            Some(&self.dir_items[self.selected].path)
         } else {
             None
         }
@@ -260,19 +258,19 @@ impl App {
                 FilterMode::Structured => self.apply_structured_filter(&kind_indices),
             }
         }
-        // Keep selected index in bounds
-        if self.selected >= self.filtered_indices.len() {
-            self.selected = self.filtered_indices.len().saturating_sub(1);
+        // Keep selected index in bounds (dirs + media)
+        if self.selected >= self.visible_count() {
+            self.selected = self.visible_count().saturating_sub(1);
         }
     }
 
     /// Check if an entry matches the current kind filter.
     fn matches_kind(&self, entry: &MediaEntry) -> bool {
-        match self.kind_filter {
-            KindFilter::All => true,
-            KindFilter::Video => matches!(entry.media.kind, MediaKind::Video | MediaKind::Av),
-            KindFilter::Audio => matches!(entry.media.kind, MediaKind::Audio),
-            KindFilter::Image => matches!(entry.media.kind, MediaKind::Image),
+        match entry.media.kind {
+            MediaKind::Video | MediaKind::Av => self.kind_filter.video,
+            MediaKind::Audio => self.kind_filter.audio,
+            MediaKind::Image => self.kind_filter.image,
+            MediaKind::Document => self.kind_filter.doc,
         }
     }
 
@@ -330,8 +328,9 @@ impl App {
         }
     }
 
-    /// Apply current sort to entries and rebuild indices.
+    /// Apply current sort to entries and dir items, then rebuild indices.
     fn apply_sort(&mut self) {
+        sort_dir_items(&mut self.dir_items, self.sort_key, self.sort_dir);
         sort_entries(&mut self.entries, self.sort_key, self.sort_dir);
         self.apply_filter();
     }
@@ -442,6 +441,15 @@ impl App {
         self.set_status(format!("Sort: {} {dir_label}", self.sort_key.label()));
     }
 
+    /// Toggle one kind in the filter, re-apply, and warn if nothing selected.
+    fn toggle_kind_filter(&mut self, toggle: fn(&mut KindFilter)) {
+        toggle(&mut self.kind_filter);
+        self.apply_filter();
+        if self.kind_filter.is_empty() {
+            self.set_status("Kind: nothing selected \u{2014} 1 to show all".to_string());
+        }
+    }
+
     /// Start background thumbnail fetch for the currently selected entry.
     /// Skips if already loading the same path or if the file has no video.
     fn kick_thumbnail_fetch(&mut self) {
@@ -515,6 +523,7 @@ impl App {
     /// Navigate to a directory: load subdirs, clear state, spawn async scan.
     fn navigate_to_dir(&mut self, path: PathBuf) {
         self.dir_items = list_subdirs(&path);
+        sort_dir_items(&mut self.dir_items, self.sort_key, self.sort_dir);
         self.sibling_dirs = list_sibling_dirs(&path);
 
         // Clear media state (but NOT mpv playback — per spec)
@@ -580,9 +589,42 @@ impl App {
     }
 }
 
-/// List subdirectories of a path, sorted alphabetically.
-fn list_subdirs(path: &std::path::Path) -> Vec<PathBuf> {
+/// List subdirectories of a path as `DirItem`s, sorted alphabetically by name.
+fn list_subdirs(path: &std::path::Path) -> Vec<DirItem> {
     let Ok(entries) = std::fs::read_dir(path) else {
+        return vec![];
+    };
+    let mut dirs: Vec<DirItem> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let path = e.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned())?;
+            let name_lower = name.to_lowercase();
+            let meta = e.metadata().ok();
+            let size_bytes = meta.as_ref().map_or(0, std::fs::Metadata::len);
+            let modified_at = meta.as_ref().and_then(|m| m.modified().ok());
+            Some(DirItem {
+                path,
+                name,
+                name_lower,
+                size_bytes,
+                modified_at,
+            })
+        })
+        .collect();
+    dirs.sort_by(|a, b| a.name_lower.cmp(&b.name_lower));
+    dirs
+}
+
+/// List sibling directories (dirs in parent) for the parent pane.
+///
+/// Returns plain `PathBuf`s since the parent pane is always alphabetical.
+fn list_sibling_dirs(path: &std::path::Path) -> Vec<PathBuf> {
+    let Some(parent) = path.parent() else {
+        return vec![];
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
         return vec![];
     };
     let mut dirs: Vec<PathBuf> = entries
@@ -592,11 +634,6 @@ fn list_subdirs(path: &std::path::Path) -> Vec<PathBuf> {
         .collect();
     dirs.sort();
     dirs
-}
-
-/// List sibling directories (dirs in parent) for the parent pane.
-fn list_sibling_dirs(path: &std::path::Path) -> Vec<PathBuf> {
-    path.parent().map_or_else(Vec::new, list_subdirs)
 }
 
 /// Run the TUI application.
@@ -792,25 +829,13 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
         }
         // Kind filter
         (KeyCode::Char('1'), _) => {
-            app.kind_filter = KindFilter::All;
+            app.kind_filter = KindFilter::ALL;
             app.apply_filter();
-            app.set_status("Filter: All".to_string());
         }
-        (KeyCode::Char('2'), _) => {
-            app.kind_filter = KindFilter::Video;
-            app.apply_filter();
-            app.set_status("Filter: Video".to_string());
-        }
-        (KeyCode::Char('3'), _) => {
-            app.kind_filter = KindFilter::Audio;
-            app.apply_filter();
-            app.set_status("Filter: Audio".to_string());
-        }
-        (KeyCode::Char('4'), _) => {
-            app.kind_filter = KindFilter::Image;
-            app.apply_filter();
-            app.set_status("Filter: Image".to_string());
-        }
+        (KeyCode::Char('2'), _) => app.toggle_kind_filter(|kf| kf.video = !kf.video),
+        (KeyCode::Char('3'), _) => app.toggle_kind_filter(|kf| kf.audio = !kf.audio),
+        (KeyCode::Char('4'), _) => app.toggle_kind_filter(|kf| kf.image = !kf.image),
+        (KeyCode::Char('5'), _) => app.toggle_kind_filter(|kf| kf.doc = !kf.doc),
         // Playback
         (KeyCode::Char('p'), _) => handle_playback(app).await,
         (KeyCode::Char('P'), _) => {
@@ -840,7 +865,11 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
             if app.current_dir != app.root_dir
                 && let Some(parent) = app.current_dir.parent().map(std::path::Path::to_path_buf)
             {
+                let child = app.current_dir.clone();
                 app.navigate_to_dir(parent);
+                if let Some(idx) = app.dir_items.iter().position(|d| d.path == child) {
+                    app.selected = idx;
+                }
             }
         }
         _ => {}
@@ -994,12 +1023,26 @@ mod tests {
                 streams: vec![],
                 tags: MediaTags::default(),
                 exif: None,
+                doc: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
                 took_ms: 10,
                 error: None,
             },
+        }
+    }
+
+    fn make_dir_item(path: &str) -> DirItem {
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map_or_else(|| ".".to_string(), |n| n.to_string_lossy().into_owned());
+        DirItem {
+            path: PathBuf::from(path),
+            name_lower: name.to_lowercase(),
+            name,
+            size_bytes: 0,
+            modified_at: None,
         }
     }
 
@@ -1172,7 +1215,12 @@ mod tests {
             5000,
         );
 
-        app.kind_filter = KindFilter::Video;
+        app.kind_filter = KindFilter {
+            video: true,
+            audio: false,
+            image: false,
+            doc: false,
+        };
         app.apply_filter();
 
         // Video filter matches MediaKind::Video and MediaKind::Av (2 entries).
@@ -1199,7 +1247,12 @@ mod tests {
         );
 
         // Audio filter matches only MediaKind::Audio (1 entry).
-        app.kind_filter = KindFilter::Audio;
+        app.kind_filter = KindFilter {
+            video: false,
+            audio: true,
+            image: false,
+            doc: false,
+        };
         app.apply_filter();
         assert_eq!(app.filtered_indices.len(), 1);
     }
@@ -1207,7 +1260,7 @@ mod tests {
     #[test]
     fn kind_filter_all_shows_everything() {
         let mut app = make_test_app(&["a.mp4", "b.mkv", "c.mp3"]);
-        app.kind_filter = KindFilter::All;
+        app.kind_filter = KindFilter::ALL;
         app.apply_filter();
         assert_eq!(app.filtered_indices.len(), 3);
     }
@@ -1233,11 +1286,79 @@ mod tests {
         );
 
         // Video kind filter + fuzzy "alpha" → only alpha.mp4 passes both predicates.
-        app.kind_filter = KindFilter::Video;
+        app.kind_filter = KindFilter {
+            video: true,
+            audio: false,
+            image: false,
+            doc: false,
+        };
         app.filter_text = "alpha".to_string();
         app.apply_filter();
         assert_eq!(app.filtered_indices.len(), 1);
         assert_eq!(app.entries[app.filtered_indices[0]].file_name, "alpha.mp4");
+    }
+
+    #[test]
+    fn kind_filter_multi_select() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+            make_entry_with_kind("photo.jpg", MediaKind::Image),
+            make_entry_with_kind("doc.pdf", MediaKind::Document),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        // Video + audio enabled, image + doc disabled.
+        app.kind_filter = KindFilter {
+            video: true,
+            audio: true,
+            image: false,
+            doc: false,
+        };
+        app.apply_filter();
+        assert_eq!(app.filtered_indices.len(), 2);
+    }
+
+    #[test]
+    fn kind_filter_empty_shows_nothing() {
+        let entries = vec![
+            make_entry_with_kind("video.mp4", MediaKind::Video),
+            make_entry_with_kind("song.mp3", MediaKind::Audio),
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let thumb_cache = ThumbnailCache::new(10, tmp.path().to_path_buf()).unwrap();
+        let picker = Picker::halfblocks();
+        let mut app = App::new(
+            entries,
+            vec![],
+            PathBuf::from("/test"),
+            thumb_cache,
+            picker,
+            4,
+            5000,
+        );
+
+        // All kinds disabled → empty list.
+        app.kind_filter = KindFilter {
+            video: false,
+            audio: false,
+            image: false,
+            doc: false,
+        };
+        app.apply_filter();
+        assert!(app.filtered_indices.is_empty());
+        assert!(app.kind_filter.is_empty());
     }
 
     #[test]
@@ -1251,8 +1372,8 @@ mod tests {
     fn selected_dir_returns_path_when_dir_selected() {
         let mut app = make_test_app(&["a.mp4"]);
         app.dir_items = vec![
-            PathBuf::from("/test/subdir1"),
-            PathBuf::from("/test/subdir2"),
+            make_dir_item("/test/subdir1"),
+            make_dir_item("/test/subdir2"),
         ];
         app.selected = 0;
         assert_eq!(app.selected_dir(), Some(&PathBuf::from("/test/subdir1")));
@@ -1262,7 +1383,7 @@ mod tests {
     #[test]
     fn selected_entry_offsets_correctly() {
         let mut app = make_test_app(&["a.mp4", "b.mkv"]);
-        app.dir_items = vec![PathBuf::from("/test/subdir")];
+        app.dir_items = vec![make_dir_item("/test/subdir")];
         // selected=0 → directory
         app.selected = 0;
         assert!(app.selected_entry().is_none());
@@ -1285,7 +1406,7 @@ mod tests {
     #[test]
     fn visible_count_includes_dirs() {
         let mut app = make_test_app(&["a.mp4"]);
-        app.dir_items = vec![PathBuf::from("/test/d1"), PathBuf::from("/test/d2")];
+        app.dir_items = vec![make_dir_item("/test/d1"), make_dir_item("/test/d2")];
         assert_eq!(app.visible_count(), 3); // 2 dirs + 1 media
     }
 
@@ -1315,10 +1436,7 @@ mod tests {
         std::fs::create_dir(root.join("middle")).unwrap();
 
         let dirs = super::list_subdirs(root);
-        let names: Vec<String> = dirs
-            .iter()
-            .map(|d| d.file_name().unwrap().to_string_lossy().into_owned())
-            .collect();
+        let names: Vec<&str> = dirs.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(names, vec!["alpha", "middle", "zebra"]);
     }
 
@@ -1349,7 +1467,7 @@ mod tests {
     #[test]
     fn toggle_mark_on_dir_is_noop() {
         let mut app = make_test_app(&["a.mp4"]);
-        app.dir_items = vec![PathBuf::from("/d")];
+        app.dir_items = vec![make_dir_item("/d")];
         app.selected = 0;
         app.toggle_mark();
         assert!(app.marked.is_empty());

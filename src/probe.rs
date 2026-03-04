@@ -126,6 +126,66 @@ pub async fn probe_file(path: &Path, timeout_ms: u64) -> Result<MediaEntry> {
     })
 }
 
+/// Probe a document file using native Rust extractors (no ffprobe).
+///
+/// # Errors
+/// Returns an error if file metadata cannot be read.
+pub async fn probe_document_file(path: &Path) -> Result<MediaEntry> {
+    let start = Instant::now();
+
+    let fs_meta = tokio::fs::metadata(path)
+        .await
+        .context("failed to read file metadata")?;
+    let fs = build_fs_info(&fs_meta);
+
+    let extension = path
+        .extension()
+        .map_or_else(String::new, |e| e.to_string_lossy().into_owned());
+
+    let doc_path = path.to_path_buf();
+    let doc_info = tokio::task::spawn_blocking(move || crate::document::probe_document(&doc_path))
+        .await
+        .unwrap_or(None);
+
+    let format_name = doc_info
+        .as_ref()
+        .map_or_else(|| extension.clone(), |d| d.format.clone());
+
+    let file_name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+
+    #[expect(clippy::cast_possible_truncation)]
+    let took_ms = start.elapsed().as_millis() as u64;
+
+    Ok(MediaEntry {
+        path: path.to_path_buf(),
+        file_name,
+        extension,
+        fs,
+        media: MediaInfo {
+            kind: MediaKind::Document,
+            container: ContainerInfo {
+                format_name: format_name.clone(),
+                format_primary: format_name,
+            },
+            duration_ms: None,
+            overall_bitrate_bps: None,
+            video: None,
+            audio: None,
+            streams: vec![],
+            tags: MediaTags::default(),
+            exif: None,
+            doc: doc_info,
+        },
+        probe: ProbeInfo {
+            backend: Cow::Borrowed("native"),
+            took_ms,
+            error: None,
+        },
+    })
+}
+
 #[expect(
     clippy::cast_possible_wrap,
     reason = "Unix timestamp seconds fit i64 until year 2262"
@@ -250,6 +310,7 @@ fn build_media_info(raw: &FfprobeOutput, ext: &str) -> MediaInfo {
         streams,
         tags,
         exif: None,
+        doc: None,
     }
 }
 

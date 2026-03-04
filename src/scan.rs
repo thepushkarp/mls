@@ -3,7 +3,7 @@
 /// Filters by recognized media file extensions. Uses tokio for concurrent
 /// metadata probing with configurable concurrency.
 use crate::probe;
-use crate::types::{MediaEntry, ProbeError, is_media_extension};
+use crate::types::{MediaEntry, ProbeError, is_document_extension, is_media_extension};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::os::unix::fs::MetadataExt;
@@ -119,8 +119,25 @@ pub async fn probe_files(
         }
 
         let tx = tx.clone();
+        let is_doc = file
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(is_document_extension);
         tasks.spawn(async move {
-            match probe::probe_file(&file, timeout_ms).await {
+            let result = if is_doc {
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(timeout_ms),
+                    probe::probe_document_file(&file),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    tracing::debug!(path = %file.display(), "document probe timed out");
+                    Err(anyhow::anyhow!("document probe timed out"))
+                })
+            } else {
+                probe::probe_file(&file, timeout_ms).await
+            };
+            match result {
                 Ok(entry) => {
                     let _ = tx.send(ScanResult::Entry(Box::new(entry))).await;
                 }
@@ -183,10 +200,12 @@ mod tests {
 
         fs::write(root.join("a.mp4"), b"fake").unwrap();
         fs::write(root.join("b.mp3"), b"fake").unwrap();
-        fs::write(root.join("c.txt"), b"not media").unwrap();
+        fs::write(root.join("c.txt"), b"text file").unwrap();
+        fs::write(root.join("d.xyz"), b"not media").unwrap();
 
         let files = discover_media_files(&[root.to_path_buf()], None);
-        assert_eq!(files.len(), 2);
+        // mp4, mp3, txt are recognized (3 files); xyz is not
+        assert_eq!(files.len(), 3);
     }
 
     #[test]

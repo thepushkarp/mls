@@ -641,6 +641,72 @@ fn resolve_field_typed<'a>(entry: &'a MediaEntry, path: &str) -> FieldValue<'a> 
             .and_then(|e| e.orientation)
             .map_or(FieldValue::Null, |v| FieldValue::Num(f64::from(v))),
 
+        // media.doc.* — string fields
+        "media.doc.format" => entry.media.doc.as_ref().map_or(FieldValue::Null, |d| {
+            FieldValue::Str(Cow::Borrowed(&d.format))
+        }),
+        "media.doc.author" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.author.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.doc.title" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.title.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.doc.subject" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.subject.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.doc.creator_app" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.creator_app.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.doc.creation_date" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.creation_date.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        "media.doc.modification_date" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.modification_date.as_ref())
+            .map_or(FieldValue::Null, |v| FieldValue::Str(Cow::Borrowed(v))),
+        // media.doc.* — numeric fields
+        "media.doc.page_count" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.page_count)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(f64::from(v))),
+        "media.doc.word_count" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.word_count)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(v as f64)),
+        "media.doc.line_count" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.line_count)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(v as f64)),
+        "media.doc.sheet_count" => entry
+            .media
+            .doc
+            .as_ref()
+            .and_then(|d| d.sheet_count)
+            .map_or(FieldValue::Null, |v| FieldValue::Num(f64::from(v))),
+
         // Convenience aliases (top-level shortcuts for common fields)
         "duration_ms" => resolve_field_typed(entry, "media.duration_ms"),
         "size_bytes" => resolve_field_typed(entry, "fs.size_bytes"),
@@ -650,6 +716,8 @@ fn resolve_field_typed<'a>(entry: &'a MediaEntry, path: &str) -> FieldValue<'a> 
         "bitrate_bps" | "bitrate" => resolve_field_typed(entry, "media.overall_bitrate_bps"),
         "camera" => resolve_field_typed(entry, "media.exif.camera_model"),
         "iso" => resolve_field_typed(entry, "media.exif.iso"),
+        "pages" => resolve_field_typed(entry, "media.doc.page_count"),
+        "author" => resolve_field_typed(entry, "media.doc.author"),
 
         // Unknown field
         _ => {
@@ -783,6 +851,7 @@ mod tests {
                 streams: vec![],
                 tags: MediaTags::default(),
                 exif: None,
+                doc: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),
@@ -1292,6 +1361,7 @@ mod tests {
                     gps_longitude: Some(139.767_125),
                     orientation: Some(1),
                 }),
+                doc: None,
             },
             probe: ProbeInfo {
                 backend: Cow::Borrowed("ffprobe"),

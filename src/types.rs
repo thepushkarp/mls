@@ -17,6 +17,8 @@ pub enum MediaKind {
     Av,
     /// Still image (JPEG, PNG, etc.).
     Image,
+    /// Document file (PDF, DOCX, TXT, etc.).
+    Document,
 }
 
 impl std::fmt::Display for MediaKind {
@@ -26,6 +28,7 @@ impl std::fmt::Display for MediaKind {
             Self::Audio => write!(f, "audio"),
             Self::Av => write!(f, "av"),
             Self::Image => write!(f, "image"),
+            Self::Document => write!(f, "document"),
         }
     }
 }
@@ -172,6 +175,32 @@ pub struct ExifInfo {
     pub orientation: Option<u32>,
 }
 
+/// Document metadata (PDF, DOCX, XLSX, TXT, etc.).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DocumentInfo {
+    pub format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sheet_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creator_app: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub creation_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modification_date: Option<String>,
+}
+
 /// Aggregated media metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaInfo {
@@ -190,6 +219,8 @@ pub struct MediaInfo {
     pub tags: MediaTags,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exif: Option<ExifInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<DocumentInfo>,
 }
 
 /// File-system metadata.
@@ -258,6 +289,18 @@ pub enum NdjsonRecord {
     },
 }
 
+/// Directory entry with cached metadata for sorting.
+#[derive(Debug, Clone)]
+pub struct DirItem {
+    pub path: PathBuf,
+    /// Display name (original case).
+    pub name: String,
+    /// Pre-lowercased name for case-insensitive sorting.
+    pub name_lower: String,
+    pub size_bytes: u64,
+    pub modified_at: Option<std::time::SystemTime>,
+}
+
 /// Sort key for media entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortKey {
@@ -269,6 +312,7 @@ pub enum SortKey {
     Resolution,
     Codec,
     Bitrate,
+    Pages,
 }
 
 impl SortKey {
@@ -283,7 +327,17 @@ impl SortKey {
             Self::Resolution => "resolution",
             Self::Codec => "codec",
             Self::Bitrate => "bitrate",
+            Self::Pages => "pages",
         }
+    }
+
+    /// Whether this sort key applies to directories.
+    ///
+    /// Media-only keys (Duration, Resolution, Codec, Bitrate, Pages) return
+    /// `false` — callers should fall back to Name sort for dirs.
+    #[must_use]
+    pub fn applies_to_dirs(self) -> bool {
+        matches!(self, Self::Path | Self::Name | Self::Size | Self::Modified)
     }
 
     /// Cycle to next sort key.
@@ -297,7 +351,8 @@ impl SortKey {
             Self::Duration => Self::Resolution,
             Self::Resolution => Self::Codec,
             Self::Codec => Self::Bitrate,
-            Self::Bitrate => Self::Path,
+            Self::Bitrate => Self::Pages,
+            Self::Pages => Self::Path,
         }
     }
 }
@@ -381,6 +436,11 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
 
 pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif"];
 
+pub const DOCUMENT_EXTENSIONS: &[&str] = &[
+    "pdf", "docx", "doc", "odt", "xlsx", "xls", "ods", "pptx", "ppt", "odp", "csv", "tsv", "txt",
+    "md",
+];
+
 /// Check if a file extension is a recognized image type.
 #[must_use]
 pub fn is_image_extension(ext: &str) -> bool {
@@ -389,7 +449,15 @@ pub fn is_image_extension(ext: &str) -> bool {
         .any(|known| ext.eq_ignore_ascii_case(known))
 }
 
-/// Check if a file extension is a recognized media type (video, audio, or image).
+/// Check if a file extension is a recognized document type.
+#[must_use]
+pub fn is_document_extension(ext: &str) -> bool {
+    DOCUMENT_EXTENSIONS
+        .iter()
+        .any(|known| ext.eq_ignore_ascii_case(known))
+}
+
+/// Check if a file extension is a recognized media type (video, audio, image, or document).
 #[must_use]
 pub fn is_media_extension(ext: &str) -> bool {
     VIDEO_EXTENSIONS
@@ -397,6 +465,7 @@ pub fn is_media_extension(ext: &str) -> bool {
         .chain(AUDIO_EXTENSIONS.iter())
         .any(|known| ext.eq_ignore_ascii_case(known))
         || is_image_extension(ext)
+        || is_document_extension(ext)
 }
 
 /// Check if a file extension is a recognized video type.
@@ -627,13 +696,14 @@ mod tests {
         assert_eq!(SortKey::Resolution.label(), "resolution");
         assert_eq!(SortKey::Codec.label(), "codec");
         assert_eq!(SortKey::Bitrate.label(), "bitrate");
+        assert_eq!(SortKey::Pages.label(), "pages");
     }
 
     #[test]
     fn sort_key_cycle_returns_to_start() {
         let start = SortKey::Path;
         let mut current = start;
-        for _ in 0..8 {
+        for _ in 0..9 {
             current = current.next();
         }
         assert_eq!(current, start);
@@ -642,7 +712,8 @@ mod tests {
     #[test]
     fn sort_key_next_sequence() {
         assert_eq!(SortKey::Path.next(), SortKey::Name);
-        assert_eq!(SortKey::Bitrate.next(), SortKey::Path);
+        assert_eq!(SortKey::Bitrate.next(), SortKey::Pages);
+        assert_eq!(SortKey::Pages.next(), SortKey::Path);
     }
 
     // --- SortDir ---
@@ -661,6 +732,7 @@ mod tests {
         assert_eq!(MediaKind::Audio.to_string(), "audio");
         assert_eq!(MediaKind::Av.to_string(), "av");
         assert_eq!(MediaKind::Image.to_string(), "image");
+        assert_eq!(MediaKind::Document.to_string(), "document");
     }
 
     // --- Extension checks ---
@@ -695,9 +767,48 @@ mod tests {
 
     #[test]
     fn is_media_extension_rejects_unknown() {
-        assert!(!is_media_extension("txt"));
-        assert!(!is_media_extension("pdf"));
+        assert!(!is_media_extension("xyz"));
+        assert!(!is_media_extension("exe"));
         assert!(!is_media_extension(""));
+    }
+
+    #[test]
+    fn is_media_extension_document() {
+        assert!(is_media_extension("pdf"));
+        assert!(is_media_extension("docx"));
+        assert!(is_media_extension("txt"));
+        assert!(is_media_extension("csv"));
+    }
+
+    #[test]
+    fn is_document_extension_accepts_documents() {
+        assert!(is_document_extension("pdf"));
+        assert!(is_document_extension("docx"));
+        assert!(is_document_extension("doc"));
+        assert!(is_document_extension("odt"));
+        assert!(is_document_extension("xlsx"));
+        assert!(is_document_extension("xls"));
+        assert!(is_document_extension("ods"));
+        assert!(is_document_extension("pptx"));
+        assert!(is_document_extension("ppt"));
+        assert!(is_document_extension("odp"));
+        assert!(is_document_extension("csv"));
+        assert!(is_document_extension("tsv"));
+        assert!(is_document_extension("txt"));
+        assert!(is_document_extension("md"));
+    }
+
+    #[test]
+    fn is_document_extension_case_insensitive() {
+        assert!(is_document_extension("PDF"));
+        assert!(is_document_extension("Docx"));
+    }
+
+    #[test]
+    fn is_document_extension_rejects_non_documents() {
+        assert!(!is_document_extension("mp4"));
+        assert!(!is_document_extension("jpg"));
+        assert!(!is_document_extension(""));
     }
 
     #[test]
