@@ -376,29 +376,44 @@ fn probe_ole2(path: &Path, ext: &str) -> Option<DocumentInfo> {
     Some(info)
 }
 
+// MS-OLEPS binary format constants
+const OLEPS_BYTE_ORDER_LE: u16 = 0xFFFE;
+const OLEPS_HEADER_MIN_LEN: usize = 48;
+const OLEPS_SECTION_OFFSET_POS: usize = 44;
+const OLEPS_MAX_PROPS: usize = 100;
+const OLEPS_SECTION_HEADER_SIZE: usize = 8;
+const OLEPS_PROP_ENTRY_SIZE: usize = 8;
+const VT_I4: u32 = 0x03;
+const VT_LPSTR: u32 = 0x1E;
+// Property IDs from the Summary Information property set
+const PIDSI_TITLE: u32 = 2;
+const PIDSI_AUTHOR: u32 = 4;
+const PIDSI_SUBJECT: u32 = 5;
+const PIDSI_PAGECOUNT: u32 = 14;
+const PIDSI_WORDCOUNT: u32 = 15;
+const PIDSI_APPNAME: u32 = 18;
+
 /// Best-effort extraction from OLE2 `SummaryInformation` stream.
 ///
 /// The stream uses MS-OLEPS binary format with property sets.
-/// We extract string properties by well-known IDs
-/// (2=Title, 4=Author, 5=Subject, 18=`AppName`).
 fn parse_summary_info(data: &[u8], info: &mut DocumentInfo) {
-    if data.len() < 48 || read_u16_le(data, 0) != 0xFFFE {
+    if data.len() < OLEPS_HEADER_MIN_LEN || read_u16_le(data, 0) != OLEPS_BYTE_ORDER_LE {
         return;
     }
 
-    let section_offset = read_u32_le(data, 44) as usize;
-    if section_offset >= data.len() || section_offset + 8 > data.len() {
+    let section_offset = read_u32_le(data, OLEPS_SECTION_OFFSET_POS) as usize;
+    if section_offset + OLEPS_SECTION_HEADER_SIZE > data.len() {
         return;
     }
 
     let prop_count = read_u32_le(data, section_offset + 4) as usize;
-    if prop_count > 100 {
+    if prop_count > OLEPS_MAX_PROPS {
         return;
     }
 
     for i in 0..prop_count {
-        let entry_offset = section_offset + 8 + i * 8;
-        if entry_offset + 8 > data.len() {
+        let entry_offset = section_offset + OLEPS_SECTION_HEADER_SIZE + i * OLEPS_PROP_ENTRY_SIZE;
+        if entry_offset + OLEPS_PROP_ENTRY_SIZE > data.len() {
             break;
         }
 
@@ -406,16 +421,15 @@ fn parse_summary_info(data: &[u8], info: &mut DocumentInfo) {
         let prop_offset = read_u32_le(data, entry_offset + 4) as usize;
         let abs_offset = section_offset + prop_offset;
 
-        if abs_offset + 8 > data.len() {
+        if abs_offset + OLEPS_SECTION_HEADER_SIZE > data.len() {
             continue;
         }
 
         let prop_type = read_u32_le(data, abs_offset);
 
-        // VT_LPSTR = 0x1E
-        if prop_type == 0x1E {
+        if prop_type == VT_LPSTR {
             let str_len = read_u32_le(data, abs_offset + 4) as usize;
-            let str_start = abs_offset + 8;
+            let str_start = abs_offset + OLEPS_SECTION_HEADER_SIZE;
             if str_start + str_len <= data.len() {
                 let raw = &data[str_start..str_start + str_len];
                 let s = String::from_utf8_lossy(raw)
@@ -424,23 +438,22 @@ fn parse_summary_info(data: &[u8], info: &mut DocumentInfo) {
                     .to_owned();
                 if !s.is_empty() {
                     match prop_id {
-                        2 => info.title = Some(s),
-                        4 => info.author = Some(s),
-                        5 => info.subject = Some(s),
-                        18 => info.creator_app = Some(s),
+                        PIDSI_TITLE => info.title = Some(s),
+                        PIDSI_AUTHOR => info.author = Some(s),
+                        PIDSI_SUBJECT => info.subject = Some(s),
+                        PIDSI_APPNAME => info.creator_app = Some(s),
                         _ => {}
                     }
                 }
             }
         }
 
-        // VT_I4 = 0x03
-        if prop_type == 0x03 && abs_offset + 8 <= data.len() {
+        if prop_type == VT_I4 && abs_offset + OLEPS_SECTION_HEADER_SIZE <= data.len() {
             let val = read_u32_le(data, abs_offset + 4);
             if val > 0 {
                 match prop_id {
-                    14 => info.page_count = Some(val),
-                    15 => info.word_count = Some(u64::from(val)),
+                    PIDSI_PAGECOUNT => info.page_count = Some(val),
+                    PIDSI_WORDCOUNT => info.word_count = Some(u64::from(val)),
                     _ => {}
                 }
             }
