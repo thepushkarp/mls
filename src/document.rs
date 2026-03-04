@@ -3,8 +3,16 @@
 /// All extractors are best-effort: failures are silently swallowed and
 /// logged at debug level. Follows the same pattern as `exif.rs`.
 use crate::types::DocumentInfo;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
+
+/// Maximum bytes to read from a single XML file inside a zip archive (4 MiB).
+/// Prevents OOM from crafted archives with enormous embedded XML.
+const MAX_XML_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Maximum bytes to scan from a text/CSV/TSV file (256 MiB).
+/// Prevents scanning multi-GB log files or data dumps.
+const MAX_TEXT_SCAN_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Extract metadata from a document file, dispatching by extension.
 ///
@@ -88,9 +96,9 @@ fn pdf_object_to_string(obj: &lopdf::Object) -> Option<String> {
 fn read_xml_from_zip(path: &Path, inner_path: &str) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
-    let mut entry = archive.by_name(inner_path).ok()?;
+    let entry = archive.by_name(inner_path).ok()?;
     let mut contents = String::new();
-    std::io::Read::read_to_string(&mut entry, &mut contents).ok()?;
+    entry.take(MAX_XML_BYTES).read_to_string(&mut contents).ok()?;
     Some(contents)
 }
 
@@ -507,15 +515,11 @@ fn read_u32_le(data: &[u8], offset: usize) -> u32 {
 
 fn probe_text_table(path: &Path, ext: &str) -> Option<DocumentInfo> {
     let file = std::fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
-    let mut line_count: u64 = 0;
-
-    for line in reader.lines() {
-        if line.is_err() {
-            break;
-        }
-        line_count += 1;
-    }
+    let reader = BufReader::new(file.take(MAX_TEXT_SCAN_BYTES));
+    let line_count = reader
+        .bytes()
+        .filter(|b| b.as_ref().is_ok_and(|&c| c == b'\n'))
+        .count() as u64;
 
     Some(DocumentInfo {
         format: ext.to_string(),
@@ -526,16 +530,20 @@ fn probe_text_table(path: &Path, ext: &str) -> Option<DocumentInfo> {
 
 fn probe_text(path: &Path, ext: &str) -> Option<DocumentInfo> {
     let file = std::fs::File::open(path).ok()?;
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::new(file.take(MAX_TEXT_SCAN_BYTES));
     let mut line_count: u64 = 0;
     let mut word_count: u64 = 0;
+    let mut buf = String::new();
 
-    for line in reader.lines() {
-        let Ok(line) = line else {
-            break;
-        };
-        line_count += 1;
-        word_count += line.split_whitespace().count() as u64;
+    loop {
+        buf.clear();
+        match reader.read_line(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                line_count += 1;
+                word_count += buf.split_whitespace().count() as u64;
+            }
+        }
     }
 
     Some(DocumentInfo {
