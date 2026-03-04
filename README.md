@@ -2,9 +2,9 @@
 
 ![Crates.io](https://img.shields.io/crates/d/media-ls)
 
-Terminal-native audio/video/image file browser with metadata columns, TUI preview, and structured JSON output.
+Terminal-native audio/video/image/document file browser with metadata columns, TUI preview, and structured JSON output.
 
-Think `fd` meets `ffprobe` meets `lazygit`.
+Think `fd` meets `ffprobe` meets `lazygit`. Documents (PDF, DOCX, XLSX, etc.) are probed natively — no external tools needed.
 
 **Dual-mode**: interactive TUI when you're at the terminal, streaming JSON when piped — one tool for humans and scripts.
 
@@ -44,10 +44,12 @@ brew install ffmpeg mpv trash
 
 | Dependency | Required | Purpose |
 |-----------|----------|---------|
-| `ffprobe` (via ffmpeg) | Yes | Metadata extraction |
+| `ffprobe` (via ffmpeg) | Yes | Metadata extraction (audio/video/image) |
 | `ffmpeg` | Yes | Thumbnail generation |
 | `mpv` | No | Playback (warned if missing) |
 | `trash` | No | Safe delete in triage mode |
+
+Document metadata (PDF, DOCX, XLSX, PPTX, ODF, OLE2, CSV, TXT, etc.) is extracted using pure Rust — no external tools required.
 
 ## Usage
 
@@ -57,6 +59,8 @@ brew install ffmpeg mpv trash
 mls                           # current directory, TUI
 mls ~/Videos ~/Music          # multiple paths
 mls --max-depth 3 ~/Media     # limit recursion
+mls --threads 8 ~/Videos      # limit probe concurrency (default: 16)
+mls -q ~/Videos               # suppress non-JSON logs
 ```
 
 Output mode is auto-detected:
@@ -127,10 +131,10 @@ Press `y` to keep, `n` to delete (moves to Trash via `trash`), `u` to undo.
 | Key | Action |
 |-----|--------|
 | `/` | Filter (fuzzy by default, prefix `=` for structured expressions) |
-| `s` | Cycle sort key (name → size → date → duration → resolution → codec → bitrate) |
+| `s` | Cycle sort key (name → size → date → duration → resolution → codec → bitrate → pages) |
 | `S` | Reverse sort direction |
 | `i` | Toggle metadata panel |
-| `1` / `2` / `3` / `4` | Kind filter: All / Video / Audio / Image |
+| `1`–`5` | Kind filter: All / Video / Audio / Image / Document |
 | `Space` | Mark/unmark file |
 | `?` | Help overlay |
 
@@ -175,6 +179,8 @@ mls --filter 'media.video.width >= 1920'               # 1080p+
 mls --filter 'media.audio.codec.name == "aac"'         # AAC audio
 mls --filter 'media.kind == "av" && duration_ms > 300000'  # video over 5 min
 mls --filter 'extension == "mp4" || extension == "mkv"'    # specific formats
+mls --filter 'pages > 100'                             # documents over 100 pages
+mls --filter 'media.tags.artist == "Radiohead"'        # by artist tag
 ```
 
 **Operators**: `==` `!=` `>` `>=` `<` `<=`
@@ -184,14 +190,18 @@ mls --filter 'extension == "mp4" || extension == "mkv"'    # specific formats
 **Values**: numbers (`60000`, `1920.0`), quoted strings (`"aac"`, `'mp4'`), bare identifiers
 
 **Field paths** (dot-separated, resolved against the `MediaEntry` JSON schema):
-- `duration_ms`, `extension`, `path`
-- `media.kind` (`"video"`, `"audio"`, `"av"`, `"image"`)
-- `media.video.width`, `media.video.height`, `media.video.codec.name`
-- `media.audio.codec.name`, `media.audio.channels`, `media.audio.channel_layout`, `media.audio.sample_rate_hz`
+- `path`, `file_name`, `extension`
+- `media.kind` (`"video"`, `"audio"`, `"av"`, `"image"`, `"document"`)
+- `media.duration_ms`, `media.overall_bitrate_bps`
+- `media.container.format_name`, `media.container.format_primary`
+- `media.video.width`, `media.video.height`, `media.video.codec.name`, `media.video.codec.profile`, `media.video.pixel_format`, `media.video.bitrate_bps`
+- `media.audio.codec.name`, `media.audio.codec.profile`, `media.audio.channels`, `media.audio.channel_layout`, `media.audio.sample_rate_hz`, `media.audio.bitrate_bps`
+- `media.tags.title`, `media.tags.artist`, `media.tags.album`, `media.tags.date`, `media.tags.genre`
 - `media.exif.camera_make`, `media.exif.camera_model`, `media.exif.lens_model`, `media.exif.focal_length_mm`, `media.exif.aperture`, `media.exif.exposure_time`, `media.exif.iso`, `media.exif.date_taken`, `media.exif.gps_latitude`, `media.exif.gps_longitude`, `media.exif.orientation`
+- `media.doc.format`, `media.doc.page_count`, `media.doc.word_count`, `media.doc.line_count`, `media.doc.sheet_count`, `media.doc.author`, `media.doc.title`, `media.doc.subject`, `media.doc.creator_app`, `media.doc.creation_date`, `media.doc.modification_date`
 - `fs.size_bytes`, `fs.modified_at`, `fs.created_at`
 
-**Shorthand aliases**: `duration_ms`, `size_bytes`, `kind`, `width`, `height`, `bitrate` / `bitrate_bps`, `camera` (→ `media.exif.camera_model`), `iso` (→ `media.exif.iso`)
+**Shorthand aliases**: `duration_ms`, `size_bytes`, `kind`, `width`, `height`, `bitrate` / `bitrate_bps`, `camera` (→ `media.exif.camera_model`), `iso` (→ `media.exif.iso`), `pages` (→ `media.doc.page_count`), `author` (→ `media.doc.author`)
 
 ## Sort keys
 
@@ -211,37 +221,45 @@ mls --sort size:asc
 | `resolution` | — | Pixel area (width x height) |
 | `codec` | — | Video codec (falls back to audio) |
 | `bitrate` | — | Overall bitrate |
+| `pages` | `page_count` | Document page count |
 
 ## JSON schema
 
-Version: `0.1.0`
+Version: `0.2.0`
 
 ### JSON output (`--json`)
 
 ```jsonc
 {
   "type": "mls.list",
-  "schema_version": "0.1.0",
-  "mls_version": "0.1.0",
+  "schema_version": "0.2.0",
+  "mls_version": "0.0.2",
   "generated_at": "2025-12-01T12:00:00Z",
   "entries": [
     {
       "path": "/Users/me/Videos/clip.mp4",
+      "file_name": "clip.mp4",
       "extension": "mp4",
       "media": {
         "kind": "av",
+        "container": { "format_name": "mov,mp4,m4a,3gp,3g2,mj2", "format_primary": "mov" },
         "duration_ms": 125400,
+        "overall_bitrate_bps": 5328000,
         "video": {
           "width": 1920, "height": 1080,
           "codec": { "name": "h264", "profile": "High", "level": "4.1" },
           "fps": { "num": 24000, "den": 1001 },
+          "pixel_format": "yuv420p",
           "bitrate_bps": 5200000
         },
         "audio": {
           "codec": { "name": "aac", "profile": "LC" },
           "channels": 2, "channel_layout": "stereo", "sample_rate_hz": 48000,
           "bitrate_bps": 128000
-        }
+        },
+        "tags": { "title": "My Clip", "artist": null, "album": null, "date": null, "genre": null },
+        "exif": null,  // populated for images
+        "doc": null     // populated for documents
       },
       "fs": { "size_bytes": 81920000, "modified_at": "2025-12-01T10:30:00Z", "created_at": "2025-11-30T08:00:00Z" },
       "probe": { "backend": "ffprobe", "took_ms": 42 }
@@ -260,7 +278,7 @@ Version: `0.1.0`
 One JSON object per line, streamed as files are probed:
 
 ```
-{"type":"mls.header","schema_version":"0.1.0","mls_version":"0.1.0","generated_at":"2025-12-01T12:00:00Z"}
+{"type":"mls.header","schema_version":"0.2.0","mls_version":"0.0.2","generated_at":"2025-12-01T12:00:00Z"}
 {"type":"mls.entry","entry":{...}}
 {"type":"mls.footer","summary":{...},"errors":[]}
 ```
@@ -281,6 +299,8 @@ One JSON object per line, streamed as files are probed:
 **Audio**: mp3, flac, wav, aac, ogg, opus, wma, m4a, aiff, aif, alac, ape, dsf, dff, wv, mka
 
 **Image**: jpg, jpeg, png, webp, gif, bmp, tiff, tif
+
+**Document**: pdf, docx, doc, odt, xlsx, xls, ods, pptx, ppt, odp, csv, tsv, txt, md
 
 ## Development
 

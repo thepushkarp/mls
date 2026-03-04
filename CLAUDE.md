@@ -33,7 +33,7 @@ src/
 ├── sort.rs        # Sort key parsing + comparison
 ├── output.rs      # JSON/NDJSON serialization (borrowing, zero-clone)
 ├── playback.rs    # mpv subprocess + Unix IPC socket control
-├── thumbnail.rs   # Thumbnail gen: ffmpeg for video, direct loading for images (no cache for images)
+├── thumbnail.rs   # Thumbnail gen: ffmpeg for video (LRU + disk cache), direct loading for images (no cache)
 └── tui/
     ├── mod.rs     # App state, event loop, key handling, directory navigation
     ├── layout.rs  # Ratatui rendering — three-pane Miller columns (parent/files/preview)
@@ -51,7 +51,7 @@ src/
 
 ### Key type: `MediaEntry` (in `types.rs`)
 
-The central data type. Every module reads or produces it. It serializes to the JSON schema (version `0.2.0`). If you change `MediaEntry`, you affect JSON output, TUI rendering, filter evaluation, and sort comparison. `MediaKind` variants: `Video`, `Audio`, `Av`, `Image`, `Document`. `MediaInfo` has optional `exif: Option<ExifInfo>` (images) and `doc: Option<DocumentInfo>` (documents) fields.
+The central data type. Every module reads or produces it. It serializes to the JSON schema (version `0.2.0`). If you change `MediaEntry`, you affect JSON output, TUI rendering, filter evaluation, and sort comparison. `MediaKind` variants: `Video`, `Audio`, `Av`, `Image`, `Document`. `MediaInfo` fields: `kind`, `container` (format_name, format_primary), `duration_ms`, `overall_bitrate_bps`, `video: Option<VideoInfo>`, `audio: Option<AudioInfo>`, `streams: Vec<StreamInfo>` (raw ffprobe streams), `tags: MediaTags` (title/artist/album/date/genre), `exif: Option<ExifInfo>` (images), `doc: Option<DocumentInfo>` (documents). `SortKey` variants: Path, Name, Size, Modified, Duration, Resolution, Codec, Bitrate, Pages.
 
 ## Conventions
 
@@ -101,7 +101,7 @@ JSON output uses borrowing structs (`ListEnvelopeRef<'a>`, `NdjsonEntryRef<'a>`)
 - **TUI has two filter modes**: `/` opens fuzzy (nucleo-matcher), prefix `=` switches to structured field expressions using the same parser as `--filter`.
 - `triage.rs` Move (`m` key) works via text input; interactive directory picker not yet built.
 - `scan.rs` uses bounded `JoinSet` spawns (not a semaphore) for concurrency control, with `mpsc` channel for streaming results to the caller.
-- Images are loaded directly in `thumbnail.rs` (bypass ffmpeg + LRU cache).
+- Images are loaded directly in `thumbnail.rs` (bypass ffmpeg + LRU cache). Video thumbnails use in-memory LRU + disk cache at `~/Library/Caches/mls/thumbnails/`.
 - `filter.rs` supports `media.exif.*` field paths and `camera`/`iso` shorthand aliases, plus `media.doc.*` field paths and `pages`/`author` shorthand aliases.
 - **Documents bypass ffprobe entirely** — probed by `document.rs` using pure Rust crates (`lopdf`, `zip`, `quick-xml`, `cfb`). Recognized extensions: pdf, docx, doc, odt, xlsx, xls, ods, pptx, ppt, odp, csv, tsv, txt, md.
 - **TUI kind filter key `5`** filters to documents. Document entries show "D" icon in file list.
