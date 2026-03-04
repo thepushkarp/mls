@@ -587,7 +587,7 @@ fn list_subdirs(path: &std::path::Path) -> Vec<DirItem> {
     };
     let mut dirs: Vec<DirItem> = entries
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|ft| ft.is_dir()))
+        .filter(|e| e.path().is_dir())
         .filter_map(|e| {
             let path = e.path();
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned())?;
@@ -620,7 +620,7 @@ fn list_sibling_dirs(path: &std::path::Path) -> Vec<PathBuf> {
     };
     let mut dirs: Vec<PathBuf> = entries
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|ft| ft.is_dir()))
+        .filter(|e| e.path().is_dir())
         .map(|e| e.path())
         .collect();
     dirs.sort();
