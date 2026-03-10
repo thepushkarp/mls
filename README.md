@@ -254,7 +254,7 @@ Version: `0.2.0`
 {
   "type": "mls.list",
   "schema_version": "0.2.0",
-  "mls_version": "0.0.2",
+  "mls_version": "0.0.3",
   "generated_at": "2025-12-01T12:00:00Z",
   "entries": [
     {
@@ -299,7 +299,7 @@ Version: `0.2.0`
 One JSON object per line, streamed as files are probed:
 
 ```
-{"type":"mls.header","schema_version":"0.2.0","mls_version":"0.0.2","generated_at":"2025-12-01T12:00:00Z"}
+{"type":"mls.header","schema_version":"0.2.0","mls_version":"0.0.3","generated_at":"2025-12-01T12:00:00Z"}
 {"type":"mls.entry","entry":{...}}
 {"type":"mls.footer","summary":{...},"errors":[]}
 ```
@@ -311,7 +311,7 @@ One JSON object per line, streamed as files are probed:
 | `0` | Success |
 | `1` | Generic/unexpected error |
 | `2` | CLI usage error (bad flag, invalid filter/sort) |
-| `4` | Missing dependency (ffprobe/ffmpeg not found) |
+| `4` | Missing dependency (`ffprobe`/`ffmpeg`, or `mpv` for playback) |
 
 ## Supported formats
 
