@@ -35,20 +35,19 @@ pub struct MpvController {
 /// Convert playback startup failures into a user-facing status string.
 #[must_use]
 pub fn playback_error_message(error: &anyhow::Error) -> String {
-    if error
+    let is_mpv_missing = error
         .to_string()
         .contains(crate::deps::PLAYBACK_REQUIRES_MPV)
-    {
-        return crate::deps::PLAYBACK_REQUIRES_MPV.to_string();
+        || error
+            .chain()
+            .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+            .any(|io_error| io_error.kind() == std::io::ErrorKind::NotFound);
+
+    if is_mpv_missing {
+        crate::deps::PLAYBACK_REQUIRES_MPV.to_string()
+    } else {
+        format!("Playback failed: {error}")
     }
-    if error
-        .chain()
-        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
-        .any(|io_error| io_error.kind() == std::io::ErrorKind::NotFound)
-    {
-        return crate::deps::PLAYBACK_REQUIRES_MPV.to_string();
-    }
-    format!("Playback failed: {error}")
 }
 
 impl MpvController {
