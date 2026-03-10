@@ -207,11 +207,16 @@ pub async fn handle_triage_key(app: &mut App, key: KeyEvent) {
         // Playback in triage
         KeyCode::Char('p') => {
             if app.mpv.state() == crate::playback::PlaybackState::Stopped {
-                let info = app
-                    .selected_entry()
-                    .map(|entry| (entry.path.clone(), entry.media.video.is_none()));
-                if let Some((path, audio_only)) = info {
-                    let _ = app.mpv.play(&path, audio_only).await;
+                let info = app.selected_entry().map(|entry| {
+                    (
+                        entry.path.clone(),
+                        entry.media.video.is_none(),
+                        entry.file_name.clone(),
+                    )
+                });
+                if let Some((path, audio_only, name)) = info {
+                    let result = app.mpv.play(&path, audio_only).await;
+                    app.apply_playback_start_result(result, &name);
                 }
             } else {
                 let _ = app.mpv.toggle_pause().await;

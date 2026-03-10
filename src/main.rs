@@ -78,12 +78,17 @@ async fn run() -> Result<()> {
         .into());
     }
 
-    // Warn about optional deps (mpv)
-    if dep_check.mpv.is_none() && !cli.quiet {
-        let _ = writeln!(
-            std::io::stderr(),
-            "Warning: mpv not found. Playback features disabled. Install: brew install mpv"
-        );
+    if dep_check.mpv.is_none() {
+        if matches!(&cli.command, Some(Command::Play { .. })) {
+            return Err(ExitCodeError {
+                code: exit_code::DEPENDENCY,
+                msg: deps::PLAYBACK_REQUIRES_MPV.into(),
+            }
+            .into());
+        }
+        if !cli.quiet {
+            let _ = writeln!(std::io::stderr(), "{}", deps::PLAYBACK_DISABLED_WARNING);
+        }
     }
 
     // Route to subcommand

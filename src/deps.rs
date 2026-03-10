@@ -6,6 +6,10 @@
 use std::fmt::Write;
 use std::process::Command as StdCommand;
 
+pub const PLAYBACK_REQUIRES_MPV: &str = "Playback requires mpv. Install: brew install mpv";
+pub const PLAYBACK_DISABLED_WARNING: &str =
+    "Warning: mpv not found. Playback features disabled. Install: brew install mpv";
+
 /// Result of checking external dependencies.
 #[derive(Debug)]
 pub struct DepCheck {

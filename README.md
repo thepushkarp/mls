@@ -21,10 +21,28 @@ mls ~/Videos | jq .   # streaming NDJSON
 brew install thepushkarp/tap/mls
 ```
 
+The Homebrew formula installs `ffmpeg` and `mpv`, so probing and playback work
+after a fresh Brew install. Install `trash` separately if you want safe delete
+in triage mode:
+
+```bash
+brew install trash
+```
+
 ### Cargo
 
 ```bash
 cargo install media-ls
+```
+
+`cargo install` only installs the `mls` binary. Install runtime tools
+separately for probe/playback support:
+
+```bash
+brew install ffmpeg mpv
+
+# Optional: safe delete in triage mode
+brew install trash
 ```
 
 ### Build from source
@@ -36,10 +54,13 @@ cargo build --release   # requires Rust 1.85+
 cp target/release/mls ~/.local/bin/  # or anywhere on PATH
 ```
 
-### Prerequisites
+For source builds, install the same runtime tools as the Cargo route:
 
 ```bash
-brew install ffmpeg mpv trash
+brew install ffmpeg mpv
+
+# Optional: safe delete in triage mode
+brew install trash
 ```
 
 | Dependency | Required | Purpose |
