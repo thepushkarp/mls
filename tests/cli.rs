@@ -81,6 +81,20 @@ fn missing_ffprobe_exits_4() {
         .code(4);
 }
 
+#[test]
+fn play_without_mpv_exits_4_with_install_hint() {
+    let tmp = setup_media_dir();
+    Command::new(cargo_bin("mls"))
+        .env("PATH", mock_bin_dir())
+        .arg("--quiet")
+        .arg("play")
+        .arg(tmp.path().join("song.mp3"))
+        .assert()
+        .code(4)
+        .stderr(predicate::str::contains("Playback requires mpv"))
+        .stderr(predicate::str::contains("brew install mpv"));
+}
+
 // --- Validation errors ---
 
 #[test]

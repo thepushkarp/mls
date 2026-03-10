@@ -1,6 +1,6 @@
 [package]
 name = "media-ls"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 description = "Media LS — terminal-native audio/video file browser with metadata columns, TUI preview, and structured JSON output"
 license = "MIT"

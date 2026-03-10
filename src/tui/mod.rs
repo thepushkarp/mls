@@ -403,6 +403,27 @@ impl App {
         self.status_ticks = 30;
     }
 
+    fn clear_playback_state(&mut self) {
+        self.playback_file_name = None;
+        self.playback_position = None;
+        self.playback_duration = None;
+    }
+
+    fn apply_playback_start_result(&mut self, result: Result<()>, name: &str) {
+        match result {
+            Ok(()) => {
+                self.playback_file_name = Some(name.to_string());
+                self.playback_position = None;
+                self.playback_duration = None;
+                self.set_status(format!("Playing: {name}"));
+            }
+            Err(error) => {
+                self.clear_playback_state();
+                self.set_status(crate::playback::playback_error_message(&error));
+            }
+        }
+    }
+
     /// Remove the currently selected media entry from the entries list.
     ///
     /// Called after successful delete or move in triage mode so the
@@ -726,9 +747,7 @@ async fn event_loop(
         // Update mpv state — detect process exit
         if app.mpv.state() != PlaybackState::Stopped && !app.mpv.is_alive() {
             app.mpv.stop().await;
-            app.playback_position = None;
-            app.playback_duration = None;
-            app.playback_file_name = None;
+            app.clear_playback_state();
         }
 
         // Poll playback position only while actively playing (not paused/stopped)
@@ -760,7 +779,6 @@ async fn event_loop(
     Ok(())
 }
 
-#[expect(clippy::too_many_lines, reason = "match arms for key handling")]
 async fn handle_key(app: &mut App, key: KeyEvent) {
     // Handle filter input mode
     if app.filter_active {
@@ -840,9 +858,7 @@ async fn handle_key(app: &mut App, key: KeyEvent) {
         (KeyCode::Char('p'), _) => handle_playback(app).await,
         (KeyCode::Char('P'), _) => {
             app.mpv.stop().await;
-            app.playback_position = None;
-            app.playback_duration = None;
-            app.playback_file_name = None;
+            app.clear_playback_state();
             app.set_status("Stopped playback".to_string());
         }
         (KeyCode::Char(']'), _) => {
@@ -946,11 +962,8 @@ async fn handle_playback(app: &mut App) {
         let _ = app.mpv.toggle_pause().await;
     } else {
         // Stopped or different file — start playing selected
-        let _ = app.mpv.play(&path, audio_only).await;
-        app.playback_file_name = Some(name.clone());
-        app.playback_position = None;
-        app.playback_duration = None;
-        app.set_status(format!("Playing: {name}"));
+        let result = app.mpv.play(&path, audio_only).await;
+        app.apply_playback_start_result(result, &name);
     }
 }
 
@@ -1446,6 +1459,27 @@ mod tests {
         assert!(app.playback_position.is_none());
         assert!(app.playback_duration.is_none());
         assert!(app.playback_file_name.is_none());
+    }
+
+    #[test]
+    fn playback_start_failure_keeps_state_empty_and_sets_error_status() {
+        let mut app = make_test_app(&["a.mp4"]);
+        let name = "a.mp4";
+
+        app.apply_playback_start_result(
+            Err(anyhow::anyhow!(
+                "Playback requires mpv. Install: brew install mpv"
+            )),
+            name,
+        );
+
+        assert!(app.playback_file_name.is_none());
+        assert!(app.playback_position.is_none());
+        assert!(app.playback_duration.is_none());
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Playback requires mpv. Install: brew install mpv")
+        );
     }
 
     #[test]
