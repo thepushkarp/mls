@@ -642,7 +642,7 @@ mod tests {
         let info = build_media_info(&raw, "");
         assert!(info.duration_ms.is_none());
         assert!(info.overall_bitrate_bps.is_none());
-        assert!(info.container.format_name.is_empty());
+        assert_eq!(info.container.format_name, "");
     }
 
     #[test]
