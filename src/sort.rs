@@ -491,7 +491,7 @@ mod tests {
         use std::time::{Duration, SystemTime};
         let t1 = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
         let t2 = SystemTime::UNIX_EPOCH + Duration::from_secs(2000);
-        let t3 = SystemTime::UNIX_EPOCH + Duration::from_secs(3000);
+        let t3 = SystemTime::UNIX_EPOCH + Duration::from_mins(50);
         let mut dirs = vec![
             make_dir_item("newest", 0, Some(t3)),
             make_dir_item("oldest", 0, Some(t1)),

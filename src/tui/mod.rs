@@ -296,7 +296,7 @@ impl App {
                     .map(|score| (i, score))
             })
             .collect();
-        scored.sort_by(|a, b| b.1.cmp(&a.1));
+        scored.sort_by_key(|a| std::cmp::Reverse(a.1));
         self.filtered_indices = scored.into_iter().map(|(i, _)| i).collect();
     }
 
@@ -1089,7 +1089,7 @@ mod tests {
         app.filter_text = "mvp4".to_string();
         app.apply_filter();
         // "mvp4" should fuzzy-match "my_video.mp4" (m..v..p..4)
-        assert!(!app.filtered_indices.is_empty());
+        assert_ne!(app.filtered_indices, Vec::<usize>::new());
         let matched_names: Vec<&str> = app
             .filtered_indices
             .iter()
@@ -1103,7 +1103,7 @@ mod tests {
         let mut app = make_test_app(&["a.mp4", "b.mkv"]);
         app.filter_text = "zzzzzzz".to_string();
         app.apply_filter();
-        assert!(app.filtered_indices.is_empty());
+        assert_eq!(app.filtered_indices, Vec::<usize>::new());
     }
 
     #[test]
@@ -1370,7 +1370,7 @@ mod tests {
             doc: false,
         };
         app.apply_filter();
-        assert!(app.filtered_indices.is_empty());
+        assert_eq!(app.filtered_indices, Vec::<usize>::new());
         assert!(app.kind_filter.is_empty());
     }
 
@@ -1436,7 +1436,7 @@ mod tests {
         assert!(app.entries.is_empty());
         assert!(app.marked.is_empty());
         assert_eq!(app.selected, 0);
-        assert!(app.filter_text.is_empty());
+        assert_eq!(app.filter_text, "");
         assert!(app.dir_scanning);
     }
 

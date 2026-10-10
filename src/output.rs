@@ -240,7 +240,7 @@ mod tests {
         write_json(&mut buf, &[], &[]).unwrap();
         let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
         let ver = val["mls_version"].as_str().unwrap();
-        assert!(!ver.is_empty());
+        assert_ne!(ver, "");
     }
 
     #[test]
@@ -249,7 +249,7 @@ mod tests {
         write_json(&mut buf, &[], &[]).unwrap();
         let val: serde_json::Value = serde_json::from_slice(&buf).unwrap();
         let ts = val["generated_at"].as_str().unwrap();
-        assert!(!ts.is_empty());
+        assert_ne!(ts, "");
     }
 
     #[test]

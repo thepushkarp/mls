@@ -410,5 +410,5 @@ fn json_sort_by_pages() {
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let entries = json["entries"].as_array().unwrap();
-    assert!(!entries.is_empty());
+    assert_ne!(entries.as_slice(), [] as [serde_json::Value; 0]);
 }
