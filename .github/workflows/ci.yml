@@ -28,6 +28,9 @@ jobs:
 
       - run: cargo test --locked
 
+      - name: Verify crates.io package
+        run: cargo publish --dry-run --locked
+
   clippy:
     name: Clippy
     runs-on: macos-latest

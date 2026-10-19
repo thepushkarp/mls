@@ -339,6 +339,29 @@ cargo build --release
 ```
 
 
+## Releasing
+
+The `media-ls` crate uses crates.io trusted publishing. Its trusted publisher
+must name GitHub owner `thepushkarp`, repository `mls`, and workflow
+`release.yml`, with no environment. The workflow obtains a temporary token;
+no `CARGO_REGISTRY_TOKEN` repository secret is needed.
+
+Update the package version and lockfile, run the development checks, and push a
+matching `vVERSION` tag. The release workflow checks that the tag matches
+`Cargo.toml` and verifies the packaged build before creating the macOS archives.
+After both macOS builds succeed, it publishes the crate and dispatches the
+Homebrew formula update using the archive checksums.
+
+To verify an existing release and trusted publishing authentication without
+uploading a crate, creating release assets, or updating Homebrew:
+
+```bash
+gh workflow run release.yml --ref main -f tag=v0.0.3
+```
+
+Published crate versions cannot be overwritten. Use a new version for changes
+to an existing release.
+
 ## License
 
 MIT
