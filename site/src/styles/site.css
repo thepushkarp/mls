@@ -98,3 +98,4 @@ kbd { font-size:12px; padding:2px 5px; border:1px solid var(--line); border-radi
 .install-alternative { border-top:1px solid var(--line); padding:10px 0 30px; }
 .install-alternative p { max-width:65ch; font-size:14px; color:var(--muted); margin:0 0 16px; }
 .install-alternative .code-block { max-width:600px; }
+@media(max-width:680px) { .json-inspector select { font-size:16px; } }
