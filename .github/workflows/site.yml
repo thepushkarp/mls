@@ -37,6 +37,8 @@ jobs:
       - run: bun run verify
         env:
           VERCEL_ENV: preview
+      - run: node --test scripts/prepare-vercel.test.mjs
+      - run: node scripts/prepare-vercel.mjs
 
   deploy:
     name: Build and deploy site
@@ -49,6 +51,7 @@ jobs:
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ENV: production
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -66,15 +69,16 @@ jobs:
           : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
       - name: Install Vercel CLI
         run: npm install --global vercel@59.16.0
-      - name: Pull production settings
-        run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
-      # vercel.json runs bun run verify; a failed check prevents publication.
+      - run: bun install --frozen-lockfile
       - name: Build and verify production output
-        run: vercel build --prod --token "$VERCEL_TOKEN"
+        run: bun run verify
+      - run: node --test scripts/prepare-vercel.test.mjs
+      - name: Prepare static deployment
+        run: node scripts/prepare-vercel.mjs
       - name: Deploy verified output
         id: deploy
         run: |
-          vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment-url"
-          DEPLOYMENT_URL=$(cat "$RUNNER_TEMP/site-deployment-url")
+          vercel deploy --prebuilt --prod --yes --json --token "$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment.json"
+          DEPLOYMENT_URL=$(jq -er '.deployment | select(.readyState == "READY") | .url' "$RUNNER_TEMP/site-deployment.json")
           echo "url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
           echo "Site deployed to $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
