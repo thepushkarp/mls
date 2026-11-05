@@ -1,0 +1,80 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: site
+
+jobs:
+  verify:
+    name: Verify site
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+        env:
+          VERCEL_ENV: preview
+
+  deploy:
+    name: Build and deploy site
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: website-production
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - name: Check deployment configuration
+        run: |
+          : "${VERCEL_ORG_ID:?Set the VERCEL_ORG_ID repository variable}"
+          : "${VERCEL_PROJECT_ID:?Set the VERCEL_PROJECT_ID repository variable}"
+          : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
+      - name: Install Vercel CLI
+        run: npm install --global vercel@59.16.0
+      - name: Pull production settings
+        run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+      # vercel.json runs bun run verify; a failed check prevents publication.
+      - name: Build and verify production output
+        run: vercel build --prod --token "$VERCEL_TOKEN"
+      - name: Deploy verified output
+        id: deploy
+        run: |
+          vercel deploy --prebuilt --prod --token "$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment-url"
+          DEPLOYMENT_URL=$(cat "$RUNNER_TEMP/site-deployment-url")
+          echo "url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+          echo "Site deployed to $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"

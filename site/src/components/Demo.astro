@@ -1,0 +1,203 @@
+---
+import samples from '../../public/samples.json';
+import MobilePreview from './MobilePreview.astro';
+---
+<MobilePreview alt="MLS in a Mac terminal, with folders on the left, movie files in the center, and artwork and metadata on the right." width={1140} height={611} />
+<div class="terminal-demo desktop-demo" id="terminal-demo" tabindex="0" role="region" aria-label="Interactive MLS file browser" aria-describedby="terminal-hint">
+  <noscript><p>Enable JavaScript to browse the sample, or <a href="/screenshots/browse.png">view the native terminal capture</a>.</p></noscript>
+  <div class="demo-toolbar"><span class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></span><span id="terminal-path">mls — ~/Media/Movies</span><button type="button" id="reset-terminal">Reset</button></div>
+  <div id="terminal-app">
+  <div class="terminal-commandline"><span>~/Media</span> % mls <span class="command-cursor" aria-hidden="true">▌</span></div>
+  <div class="terminal-controls" hidden><label><span class="sr-only">Filter sample files</span><input id="terminal-filter" type="search" placeholder="/ Filter files" autocomplete="off" /></label></div>
+  <div id="terminal-help-text" hidden><strong>MLS keys</strong><p>↑↓ / j k move · ← / h parent · → / l / Enter open · g / G first / last · Ctrl-d / Ctrl-u page</p><p>/ filter · s sort · S reverse · 1–5 kinds · Space mark · i metadata · p play/pause · P stop · [ ] seek · q quit</p><p>Double-click opens a folder or plays media. Escape closes help. Tab leaves the terminal.</p></div>
+  <div class="terminal-columns">
+    <nav class="directory-pane" aria-label="Sample folders"><span class="pane-title">Parent</span><button data-folder="all" aria-pressed="false">~/Media</button><button data-folder="video" aria-pressed="true">Movies/</button><button data-folder="audio" aria-pressed="false">Music/</button><button data-folder="image" aria-pressed="false">Posters/</button><button data-folder="document" aria-pressed="false">Notes/</button></nav>
+    <div class="file-pane"><div class="pane-title" id="terminal-count">Media — {samples.length} files</div><div id="terminal-files" role="group" aria-label="Sample files">{samples.map((sample,index)=><button class="file-row" data-entry={`file:${index}`} aria-pressed={index===0}><span class="kind">{sample.media.kind==='video'?'V':sample.media.kind==='audio'?'A':sample.media.kind==='image'?'I':'D'}</span><span>{sample.file_name}</span></button>)}</div><p id="terminal-empty" hidden>No matching files.</p></div>
+    <div class="preview-pane" aria-live="polite" aria-atomic="true"><div class="pane-title">Preview</div><pre id="terminal-folder" hidden></pre><img id="terminal-poster" src="/artwork/charge.jpg" alt="Charge poster" width="764" height="1080" /><div id="terminal-audio" hidden aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 34V12l22-5v22M18 19l22-5" /><ellipse cx="12" cy="35" rx="6" ry="4" /><ellipse cx="34" cy="30" rx="6" ry="4" /></svg></div><pre id="terminal-document" hidden>{'# Open films\n\nSample files using CC BY 4.0 artwork from Blender Studio.\n'}</pre><dl id="terminal-metadata"></dl></div>
+  </div>
+  <div id="terminal-playback" hidden><span id="playback-title"></span><span id="playback-time"></span><button type="button" id="terminal-pause">Pause</button><button type="button" id="terminal-stop">Stop</button></div>
+  <div class="terminal-status"><span id="terminal-selected">Charge.mp4</span><span id="terminal-sort">name ↑</span></div>
+  <div class="terminal-keys" id="terminal-hint"><button type="button" id="terminal-up" aria-label="Move up">↑</button><button type="button" id="terminal-down" aria-label="Move down">↓</button><button type="button" id="terminal-parent">← Parent</button><button type="button" id="terminal-open">↵ Open</button><button type="button" id="terminal-filter-button">/ Filter</button><button type="button" id="terminal-sort-button">s Sort</button><button type="button" id="terminal-play">p Play</button><button type="button" id="terminal-help" aria-expanded="false" aria-controls="terminal-help-text">? Help</button></div>
+  </div>
+  <form id="terminal-shell" hidden><label for="terminal-command"><span>~/Media</span> %</label><input id="terminal-command" value="mls ~/Media" aria-label="Terminal command" spellcheck="false" autocomplete="off" /><button type="submit">Run</button><p id="shell-message" role="status"></p></form>
+</div>
+<script>
+  import samples from '../../public/samples.json';
+  function initDemo() {
+  const root=document.querySelector<HTMLElement>('#terminal-demo')!;
+  const input=document.querySelector<HTMLInputElement>('#terminal-filter')!;
+  const list=document.querySelector<HTMLElement>('#terminal-files')!;
+  const metadata=document.querySelector<HTMLElement>('#terminal-metadata')!;
+  const poster=document.querySelector<HTMLImageElement>('#terminal-poster')!;
+  const documentPreview=document.querySelector<HTMLElement>('#terminal-document')!;
+  const audioPreview=document.querySelector<HTMLElement>('#terminal-audio')!;
+  const folderPreview=document.querySelector<HTMLElement>('#terminal-folder')!;
+  const folders:Record<string,string>={all:'Media',video:'Movies',audio:'Music',image:'Posters',document:'Notes'};
+  type Entry={key:string;label:string;index?:number;folder?:string};
+  let folder='video',selected='file:0',kind='all',sort='name',reverse=false;
+  const marked=new Set<number>();
+  let playback:number|null=null,position=0,playing=false;
+  const clock=(seconds:number)=>`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
+  const filterRow=document.querySelector<HTMLElement>('.terminal-controls')!;
+  const app=document.querySelector<HTMLElement>('#terminal-app')!;
+  const shell=document.querySelector<HTMLElement>('#terminal-shell')!;
+  const command=document.querySelector<HTMLInputElement>('#terminal-command')!;
+  function visible():Entry[] {
+    if(folder==='all')return Object.entries(folders).filter(([key,label])=>key!=='all'&&label.toLowerCase().includes(input.value.toLowerCase())).map(([key,label])=>({key:`folder:${key}`,label:`${label}/`,folder:key}));
+    const entries=samples.map((sample,index)=>({sample,index})).filter(({sample})=>sample.media.kind===folder&&(kind==='all'||sample.media.kind===kind)&&sample.file_name.toLowerCase().includes(input.value.toLowerCase()));
+    entries.sort((a,b)=>{
+      const result=sort==='duration'?(a.sample.media.duration_ms||0)-(b.sample.media.duration_ms||0):sort==='codec'?(a.sample.media.video?.codec.name||a.sample.media.audio?.codec.name||'').localeCompare(b.sample.media.video?.codec.name||b.sample.media.audio?.codec.name||''):a.sample.file_name.localeCompare(b.sample.file_name);
+      return reverse?-result:result;
+    });
+    return entries.map(({sample,index})=>({key:`file:${index}`,label:sample.file_name,index}));
+  }
+  function render() {
+    const entries=visible();
+    if(!entries.some(item=>item.key===selected))selected=entries[0]?.key||'';
+    const selectedEntry=entries.find(item=>item.key===selected);
+    const focusedKey=(document.activeElement as HTMLElement)?.closest<HTMLElement>('[data-entry]')?.dataset.entry;
+    const existing=new Map([...list.querySelectorAll<HTMLButtonElement>('[data-entry]')].map(button=>[button.dataset.entry!,button]));
+    for(const [key,button] of existing)if(!entries.some(entry=>entry.key===key))button.remove();
+    entries.forEach((entry,at)=>{
+      const button=existing.get(entry.key)||document.createElement('button');button.type='button';button.className='file-row';button.dataset.entry=entry.key;button.setAttribute('aria-pressed',String(entry.key===selected));
+      if(!button.firstElementChild){const marker=document.createElement('span');marker.className='kind';button.append(marker,document.createElement('span'));}
+      button.firstElementChild!.textContent=entry.folder?'›':marked.has(entry.index!)?'*':({video:'V',audio:'A',image:'I',document:'D'}[samples[entry.index!].media.kind]||'');
+      button.lastElementChild!.textContent=entry.label;if(list.children[at]!==button)list.insertBefore(button,list.children[at]||null);
+      if(focusedKey===entry.key)button.focus({preventScroll:true});
+    });
+    // Removing a focused row must keep keyboard shortcuts inside the terminal.
+    if(focusedKey&&!entries.some(entry=>entry.key===focusedKey))root.focus({preventScroll:true});
+    root.querySelectorAll<HTMLButtonElement>('[data-folder]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.folder===folder)));
+    document.querySelector('#terminal-count')!.textContent=`${folders[folder]} — ${entries.length} ${folder==='all'?'folders':'files'}`;
+    document.querySelector('#terminal-path')!.textContent=`mls — ~/Media${folder==='all'?'':'/'+folders[folder]}`;
+    document.querySelector('#terminal-sort')!.textContent=`${sort} ${reverse?'↓':'↑'}${kind==='all'?'':' · '+kind}${marked.size?' · '+marked.size+' marked':''}`;
+    document.querySelector<HTMLElement>('#terminal-empty')!.hidden=entries.length>0;
+    metadata.replaceChildren();poster.hidden=true;documentPreview.hidden=true;audioPreview.hidden=true;folderPreview.hidden=true;
+    document.querySelector('#terminal-selected')!.textContent=selectedEntry?`${entries.findIndex(item=>item.key===selected)+1}/${entries.length} ${selectedEntry.label}`:'No file selected';
+    if(!selectedEntry)return;
+    if(selectedEntry.folder){folderPreview.hidden=false;folderPreview.textContent=`${folders[selectedEntry.folder]}/\n${samples.filter(sample=>sample.media.kind===selectedEntry.folder).length} files`;return;}
+    const sample=samples[selectedEntry.index!],media=sample.media;
+    const rows:[string,string][]=[['File',sample.file_name],['Kind',media.kind]];
+    if(media.video)rows.push(['Resolution',`${media.video.width} × ${media.video.height}`],['Codec',media.video.codec.name]);
+    if(media.duration_ms)rows.push(['Duration',clock(media.duration_ms/1000)]);
+    if(media.video?.fps)rows.push(['FPS',String(media.video.fps.num/media.video.fps.den)]);
+    if(media.audio) {
+      rows.push(['Codec',media.audio.codec.name],['Channels',media.audio.channel_layout||(media.audio.channels===1?'mono':String(media.audio.channels))]);
+      if(media.audio.sample_rate_hz)rows.push(['Sample rate',`${media.audio.sample_rate_hz/1000} kHz`]);
+      if(media.audio.bitrate_bps)rows.push(['Bitrate',`${media.audio.bitrate_bps/1000} kbps`]);
+      if(media.tags?.title)rows.push(['Title',media.tags.title]);
+      if(media.tags?.artist)rows.push(['Artist',media.tags.artist]);
+    }
+    if(media.doc)rows.push(['Words',String(media.doc.word_count)],['Lines',String(media.doc.line_count)]);
+    for(const [label,value] of rows){const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;metadata.append(dt,dd);}
+    if(media.kind==='document')documentPreview.hidden=false;
+    else if(media.kind==='audio')audioPreview.hidden=false;
+    else {const film=sample.file_name.includes('Sprite')?'sprite-fright':sample.file_name.includes('Spring')?'spring':'charge';poster.src=`/artwork/${film}.jpg`;poster.alt=`Poster for ${sample.file_name.replace(/^Poster - /,'').replace(/\.(jpg|mp4)$/,'')}`;poster.hidden=false;}
+    window.dispatchEvent(new CustomEvent('demo-filechange',{detail:{index:selectedEntry.index}}));
+  }
+  function focusSelection(){const button=list.querySelector<HTMLButtonElement>('[aria-pressed=true]');(button||root).focus({preventScroll:true});button?.scrollIntoView({block:'nearest'});}
+  function navigate(next:string){folder=next;kind='all';input.value='';render();focusSelection();}
+  function move(delta:number){const entries=visible();if(!entries.length)return;const at=entries.findIndex(item=>item.key===selected);selected=entries[Math.max(0,Math.min(entries.length-1,at+delta))].key;render();focusSelection();}
+  function renderPlayback(){const bar=document.querySelector<HTMLElement>('#terminal-playback')!;bar.hidden=playback===null;if(playback===null)return;document.querySelector('#playback-title')!.textContent=samples[playback].file_name;document.querySelector('#playback-time')!.textContent=`${clock(position)} / ${clock((samples[playback].media.duration_ms||0)/1000)}`;document.querySelector('#terminal-pause')!.textContent=playing?'Pause':'Play';}
+  function playSelection(){const entry=visible().find(item=>item.key===selected);if(!entry||entry.index===undefined||!['audio','video'].includes(samples[entry.index].media.kind))return;if(playback===entry.index)playing=!playing;else{playback=entry.index;position=0;playing=true;}if(position>=(samples[playback].media.duration_ms||0)/1000){position=0;playing=true;}renderPlayback();}
+  function openSelection(){const entry=visible().find(item=>item.key===selected);if(entry?.folder)navigate(entry.folder);else playSelection();}
+  function seek(delta:number){if(playback!==null){position=Math.max(0,Math.min((samples[playback].media.duration_ms||0)/1000,position+delta));renderPlayback();}}
+  list.addEventListener('click',event=>{const button=(event.target as HTMLElement).closest<HTMLButtonElement>('[data-entry]');if(button){selected=button.dataset.entry!;render();}});
+  list.addEventListener('dblclick',openSelection);
+  root.querySelectorAll<HTMLButtonElement>('[data-folder]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.folder!)));
+  input.addEventListener('input',render);
+  const help=document.querySelector<HTMLButtonElement>('#terminal-help')!;
+  function toggleHelp(){const text=document.querySelector<HTMLElement>('#terminal-help-text')!;text.hidden=!text.hidden;help.setAttribute('aria-expanded',String(!text.hidden));}
+  help.addEventListener('click',toggleHelp);
+  function showFilter(){filterRow.hidden=false;input.focus();}
+  function cycleSort(){const sorts=['name','duration','codec'];sort=sorts[(sorts.indexOf(sort)+1)%sorts.length];render();}
+  document.querySelector('#terminal-filter-button')!.addEventListener('click',showFilter);
+  document.querySelector('#terminal-sort-button')!.addEventListener('click',cycleSort);
+  document.querySelector('#terminal-up')!.addEventListener('click',()=>move(-1));
+  document.querySelector('#terminal-down')!.addEventListener('click',()=>move(1));
+  document.querySelector('#terminal-parent')!.addEventListener('click',()=>navigate('all'));
+  document.querySelector('#terminal-open')!.addEventListener('click',openSelection);
+  document.querySelector('#terminal-play')!.addEventListener('click',playSelection);
+  document.querySelector('#terminal-pause')!.addEventListener('click',()=>{playing=!playing;renderPlayback();});
+  document.querySelector('#terminal-stop')!.addEventListener('click',()=>{playing=false;playback=null;renderPlayback();});
+  setInterval(()=>{if(playing&&playback!==null&&!document.hidden){position=Math.min((samples[playback].media.duration_ms||0)/1000,position+1);if(position===(samples[playback].media.duration_ms||0)/1000)playing=false;renderPlayback();}},1000);
+  function quit(){app.hidden=true;shell.hidden=false;playing=false;playback=null;renderPlayback();command.focus();}
+  document.querySelector('#terminal-shell')!.addEventListener('submit',event=>{event.preventDefault();const match=command.value.trim().match(/^mls(?:\s+(?:~\/Media(?:\/(Movies|Music|Posters|Notes))?|\.))?$/);if(!match){document.querySelector('#shell-message')!.textContent='Try mls ~/Media, or mls ~/Media/Music.';return;}document.querySelector('#shell-message')!.textContent='';app.hidden=false;shell.hidden=true;navigate(Object.keys(folders).find(key=>folders[key]===match[1])||'all');});
+  root.addEventListener('keydown',event=>{
+    if(shell.contains(event.target as Node)||event.metaKey||event.altKey)return;
+    if(event.ctrlKey){if(event.key==='c'){event.preventDefault();quit();}else if(['d','u'].includes(event.key)){event.preventDefault();move(event.key==='d'?5:-5);}return;}
+    if(event.target===input){if(['Escape','Enter'].includes(event.key)){event.preventDefault();if(event.key==='Escape')input.value='';filterRow.hidden=true;render();focusSelection();}return;}
+    if(event.key==='Tab')return;
+    // Native toolbar buttons retain Enter/Space activation; app shortcuts apply
+    // to the terminal and file rows rather than hijacking every control.
+    if(['Enter',' '].includes(event.key)&&(event.target as HTMLElement).closest('button:not(.file-row)'))return;
+    if(['ArrowDown','j'].includes(event.key)){event.preventDefault();move(1);}
+    else if(['ArrowUp','k'].includes(event.key)){event.preventDefault();move(-1);}
+    else if(['ArrowRight','l','Enter'].includes(event.key)){event.preventDefault();openSelection();}
+    else if(['ArrowLeft','h','Backspace'].includes(event.key)){event.preventDefault();navigate('all');}
+    else if(event.key==='g'||event.key==='G'){event.preventDefault();move(event.key==='g'?-999:999);}
+    else if(event.key==='/'){event.preventDefault();showFilter();}
+    else if(event.key==='?'){event.preventDefault();toggleHelp();}
+    else if(event.key==='Escape'){document.querySelector<HTMLElement>('#terminal-help-text')!.hidden=true;help.setAttribute('aria-expanded','false');input.value='';kind='all';render();}
+    else if(event.key==='s')cycleSort();
+    else if(event.key==='S'){reverse=!reverse;render();}
+    else if(event.key==='i')metadata.hidden=!metadata.hidden;
+    else if(['1','2','3','4','5'].includes(event.key)){kind=['all','video','audio','image','document'][Number(event.key)-1];render();}
+    else if(event.key===' '){event.preventDefault();const entry=visible().find(item=>item.key===selected);if(entry?.index!==undefined){if(marked.has(entry.index))marked.delete(entry.index);else marked.add(entry.index);render();}}
+    else if(event.key==='p')playSelection();
+    else if(event.key==='P'){playing=false;playback=null;renderPlayback();}
+    else if(event.key==='[')seek(-10);
+    else if(event.key===']')seek(10);
+    else if(event.key==='q')quit();
+  });
+  document.querySelector('#reset-terminal')!.addEventListener('click',()=>{folder='video';selected='file:0';kind='all';sort='name';reverse=false;marked.clear();input.value='';filterRow.hidden=true;metadata.hidden=false;playing=false;playback=null;renderPlayback();shell.hidden=true;app.hidden=false;document.querySelector<HTMLElement>('#terminal-help-text')!.hidden=true;help.setAttribute('aria-expanded','false');render();});
+  render();
+  }
+  const mobile=matchMedia('(max-width:900px), (hover:none) and (pointer:coarse)');
+  function startDesktopDemo() {
+    if(mobile.matches)return;
+    initDemo();mobile.removeEventListener('change',startDesktopDemo);
+  }
+  mobile.addEventListener('change',startDesktopDemo);
+  startDesktopDemo();
+</script>
+<style>
+  .terminal-demo { position:relative;overflow:hidden;border-radius:11px;background:#101419;color:#d4dbe1;border:1px solid #506167;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 20px 65px #0003; }
+  .demo-toolbar { display:flex;align-items:center;justify-content:space-between;gap:10px;background:#1c2529;padding:8px 12px;color:#bdccce;font:12px/1.5 -apple-system,sans-serif; }
+  .traffic-lights { display:flex;gap:7px;flex:none; }.traffic-lights i { width:11px;height:11px;border-radius:50%;background:#ff6058; }.traffic-lights i:nth-child(2){background:#febc2e}.traffic-lights i:nth-child(3){background:#28c840}
+  #terminal-path { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .terminal-commandline { padding:12px 16px 16px;color:#e0e7eb;font-size:12px; }.terminal-commandline > span:first-child,#terminal-shell label span { color:#8ddbcc; }.command-cursor { color:#abbcc1; }
+  button,input { font:inherit;color:inherit; }
+  button { cursor:pointer;min-height:32px;background:transparent;border:1px solid #506167;padding:4px 9px; }
+  button:hover { background:#253136; }
+  :focus-visible { outline:2px solid #8ddbcc;outline-offset:2px; }
+  .terminal-controls { display:flex;gap:10px;padding:12px; }
+  .terminal-controls label { flex:1;min-width:0; }
+  input { background:#171f24;border:1px solid #506167;padding:7px 10px;min-height:36px;width:100%; }
+  input::placeholder { color:#a8b8bf; }
+  #terminal-help-text { position:absolute;z-index:2;top:90px;left:10%;right:10%;padding:20px;border:1px solid #75d5d0;background:#19242b;box-shadow:0 10px 45px #0009;color:#e0e7ec;font-size:13px; }#terminal-help-text p { margin:12px 0 0; }
+  .terminal-columns { display:grid;grid-template-columns:20% 43% 37%;min-height:440px;padding:0 12px 12px; }
+  .directory-pane,.file-pane,.preview-pane { min-width:0;border:1px solid #506167;padding:8px; }
+  .file-pane { border-color:#63c9c5; }
+  .pane-title { color:#75d5d0;margin:-1px 0 9px;font-size:13px; }
+  .directory-pane button { display:block;border:0;color:#80b6ff;padding:4px 2px;width:100%;text-align:left; }
+  .directory-pane button[aria-pressed=true] { color:#f4d16b;font-weight:700; }
+  .terminal-demo :global(.file-row) { display:flex;gap:8px;align-items:baseline;width:100%;min-height:32px;text-align:left;border:0;padding:5px 4px;overflow-wrap:anywhere;background:transparent;color:inherit;font:inherit;cursor:pointer; }
+  .terminal-demo :global(.file-row:hover) { background:#253136; }
+  .terminal-demo :global(.file-row[aria-pressed=true]) { color:#fff;background:#46545b; }
+  .terminal-demo :global(.file-row:focus-visible) { outline:2px solid #8ddbcc;outline-offset:-2px; }
+  .terminal-demo :global(.kind) { color:#aebec6;flex:none; }
+  .terminal-demo :global(.file-row[aria-pressed=true] .kind) { color:inherit; }
+  #terminal-empty { color:#aebec6;font-size:13px; }
+  .preview-pane img { display:block;width:100%;height:200px;object-fit:contain;margin:0 auto 14px; }
+  .preview-pane pre { margin:10px 0 20px;font-size:13px;line-height:1.6;white-space:pre-wrap; }
+  #terminal-audio { display:grid;place-items:center;height:110px;margin-bottom:14px;color:#75d5d0; }
+  #terminal-audio svg { width:52px;height:52px; }
+  dl { display:grid;grid-template-columns:auto 1fr;gap:5px 10px;margin:0;font-size:12px; }
+  .preview-pane :global(dt) { color:#aebec6; } .preview-pane :global(dd) { margin:0;overflow-wrap:anywhere; }
+  .terminal-status { display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;border-top:1px solid #506167;padding:8px 12px;color:#b7c6cc;font-size:12px; }
+  .terminal-keys { display:flex;gap:2px;flex-wrap:wrap;padding:0 8px 8px; }.terminal-keys button { border:0;color:#b9cbd1;font-size:11px;padding:4px 6px; }
+  #terminal-playback { display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:8px 12px;border-top:1px solid #506167;font-size:12px;color:#8ddbcc; }#playback-title { flex:1;overflow-wrap:anywhere; }
+  #terminal-shell { display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-height:300px;align-content:flex-start;padding:20px;font-size:13px; }#terminal-shell input { flex:1;min-width:120px;border:0;background:transparent;padding:0; }#shell-message { width:100%;color:#e6c276; }
+  [hidden] { display:none!important; }
+</style>

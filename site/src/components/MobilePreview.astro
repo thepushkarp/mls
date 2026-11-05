@@ -1,0 +1,25 @@
+---
+interface Props { alt: string; width: number; height: number }
+const { alt, width, height } = Astro.props;
+---
+<picture class="mobile-preview" data-mobile-preview>
+  <source media="(prefers-color-scheme: dark)" srcset="/screenshots/demo-desktop-dark.png" />
+  <img src="/screenshots/demo-desktop-light.png" {alt} {width} {height} loading="lazy" decoding="async" />
+</picture>
+<script>
+  const source=document.querySelector<HTMLSourceElement>('[data-mobile-preview] source')!;
+  function syncPreviewTheme() {
+    const theme=document.documentElement.dataset.theme;
+    source.media=theme==='dark'?'all':theme==='light'?'not all':'(prefers-color-scheme: dark)';
+  }
+  window.addEventListener('appearancechange',syncPreviewTheme);
+  syncPreviewTheme();
+</script>
+<style>
+  .mobile-preview { display:none; }
+  img { display:block;width:100%;height:auto; }
+  @media(max-width:900px), (hover:none) and (pointer:coarse) {
+    .mobile-preview { display:block; }
+    :global(.desktop-demo) { display:none; }
+  }
+</style>

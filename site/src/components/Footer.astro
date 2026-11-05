@@ -1,0 +1,20 @@
+---
+import data from '../content.json';
+---
+<footer class="site-footer shell">
+  <div class="footer-main"><a href="https://www.thepushkarp.com/">Made by Pushkar Patel</a><nav aria-label="Footer"><a href={data.docs[0].url}>Documentation</a><a href="/index.md">Markdown guide</a><a href="/agents.md">For agents</a></nav></div>
+  <details class="credits" id="artwork-credits"><summary>Film artwork & credits</summary><p>Film artwork by Blender Studio, used under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Source artwork is unchanged and scaled to fit. Sample app data is illustrative. No endorsement is implied.</p><ul>{data.artwork.map((art) => <li><a href={art.url}>{art.title}</a> · <a href={art.source}>Licensed source</a></li>)}</ul><a href="/artwork/ATTRIBUTION.txt">Plain-text attribution</a></details>
+</footer>
+<p class="sr-only" id="copy-status" role="status"></p>
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => button.addEventListener('click',async () => {
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy!);
+      button.textContent='Copied';
+      document.querySelector('#copy-status')!.textContent='Command copied to clipboard.';
+      setTimeout(() => {button.textContent='Copy';},1800);
+    } catch {
+      document.querySelector('#copy-status')!.textContent='Could not copy. Select the command and copy it manually.';
+    }
+  }));
+</script>

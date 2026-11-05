@@ -1,0 +1,178 @@
+[
+  {
+    "file_name": "Charge.mp4",
+    "media": {
+      "kind": "video",
+      "duration_ms": 12000,
+      "video": {
+        "width": 640,
+        "height": 360,
+        "fps": {
+          "num": 25,
+          "den": 1
+        },
+        "bitrate_bps": 37504,
+        "codec": {
+          "name": "h264",
+          "profile": "High",
+          "level": "30"
+        },
+        "pixel_format": "yuvj420p"
+      },
+      "tags": {
+        "title": "Charge"
+      }
+    }
+  },
+  {
+    "file_name": "Film notes.md",
+    "media": {
+      "kind": "document",
+      "tags": {},
+      "doc": {
+        "format": "md",
+        "word_count": 13,
+        "line_count": 3
+      }
+    }
+  },
+  {
+    "file_name": "Poster - Charge.jpg",
+    "media": {
+      "kind": "image",
+      "video": {
+        "width": 764,
+        "height": 1080,
+        "codec": {
+          "name": "mjpeg",
+          "profile": "Progressive",
+          "level": "-99"
+        },
+        "pixel_format": "yuvj420p"
+      },
+      "tags": {}
+    }
+  },
+  {
+    "file_name": "Poster - Spring.jpg",
+    "media": {
+      "kind": "image",
+      "video": {
+        "width": 764,
+        "height": 1080,
+        "codec": {
+          "name": "mjpeg",
+          "profile": "Progressive",
+          "level": "-99"
+        },
+        "pixel_format": "yuvj420p"
+      },
+      "tags": {}
+    }
+  },
+  {
+    "file_name": "Poster - Sprite Fright.jpg",
+    "media": {
+      "kind": "image",
+      "video": {
+        "width": 764,
+        "height": 1080,
+        "codec": {
+          "name": "mjpeg",
+          "profile": "Progressive",
+          "level": "-99"
+        },
+        "pixel_format": "yuvj420p"
+      },
+      "tags": {}
+    }
+  },
+  {
+    "file_name": "Spring.mp4",
+    "media": {
+      "kind": "video",
+      "duration_ms": 12000,
+      "video": {
+        "width": 640,
+        "height": 360,
+        "fps": {
+          "num": 25,
+          "den": 1
+        },
+        "bitrate_bps": 47202,
+        "codec": {
+          "name": "h264",
+          "profile": "High",
+          "level": "30"
+        },
+        "pixel_format": "yuvj420p"
+      },
+      "tags": {
+        "title": "Spring"
+      }
+    }
+  },
+  {
+    "file_name": "Sprite Fright.mp4",
+    "media": {
+      "kind": "video",
+      "duration_ms": 12000,
+      "video": {
+        "width": 640,
+        "height": 360,
+        "fps": {
+          "num": 25,
+          "den": 1
+        },
+        "bitrate_bps": 50329,
+        "codec": {
+          "name": "h264",
+          "profile": "High",
+          "level": "30"
+        },
+        "pixel_format": "yuvj420p"
+      },
+      "tags": {
+        "title": "Sprite Fright"
+      }
+    }
+  },
+  {
+    "file_name": "Stereo reference.flac",
+    "media": {
+      "kind": "audio",
+      "duration_ms": 12000,
+      "audio": {
+        "channels": 2,
+        "channel_layout": "stereo",
+        "sample_rate_hz": 44100,
+        "codec": {
+          "name": "flac"
+        }
+      },
+      "tags": {
+        "title": "Stereo reference",
+        "artist": "Sample library"
+      }
+    }
+  },
+  {
+    "file_name": "Studio check.wav",
+    "media": {
+      "kind": "audio",
+      "duration_ms": 12000,
+      "audio": {
+        "channels": 1,
+        "sample_rate_hz": 48000,
+        "bitrate_bps": 768000,
+        "codec": {
+          "name": "pcm_s16le"
+        }
+      },
+      "tags": {
+        "title": "Studio check",
+        "artist": "Sample library"
+      }
+    }
+  }
+]

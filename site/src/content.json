@@ -1,0 +1,185 @@
+{
+  "seoTitle": "mls — Browse Media Files and Metadata in Your Terminal",
+  "socialImageAlt": "mls. ls for what’s inside your media files. mls.thepushkarp.com",
+  "operatingSystem": "macOS",
+  "name": "MLS — Media LS",
+  "shortName": "mls",
+  "tagline": "See what’s in your files.",
+  "description": "A terminal-native media and document browser with previews, metadata, filters, and structured JSON or NDJSON output.",
+  "headline": "ls for what’s\ninside your media files.",
+  "intro": "Browse videos, audio, images, and documents in your terminal. Inspect their metadata or export it as JSON. Everything runs locally.",
+  "category": "Media LS · a Rust command-line tool",
+  "cta": "Install mls",
+  "requirements": [
+    "Audio, video, images & documents",
+    "TUI + JSON",
+    "MIT licensed"
+  ],
+  "repo": "https://github.com/thepushkarp/mls",
+  "demoCaption": "Real MLS terminal output from generated sample files, with folder navigation, video thumbnails, metadata, and keyboard shortcuts.",
+  "benefits": [
+    {
+      "title": "Look inside, without opening.",
+      "body": "See duration, resolution, codecs, camera details, and document metadata while moving through your files."
+    },
+    {
+      "title": "Find the files that fit.",
+      "body": "Filter by metadata, sort the results, and limit the output. Fuzzy search is there when you remember part of a name."
+    },
+    {
+      "title": "A browser. Also a building block.",
+      "body": "Get a TUI in the terminal and streaming NDJSON when piped. Request a single JSON document with --json."
+    }
+  ],
+  "workflowTitle": "One command. Two ways to work.",
+  "workflowIntro": "Browse interactively, then take the same metadata into scripts and coding-agent workflows.",
+  "examples": [
+    {
+      "title": "Browse your collection",
+      "code": "mls ~/Videos ~/Music",
+      "body": "Navigate files with previews and metadata."
+    },
+    {
+      "title": "Find longer videos",
+      "code": "mls --json --filter 'duration_ms > 60000' \\\n  --sort duration_ms:desc --limit 10 ~/Videos",
+      "body": "Filter, sort, and cap the results in one command."
+    },
+    {
+      "title": "Inspect one file",
+      "code": "mls info clip.mp4",
+      "body": "Get detailed JSON metadata for a file."
+    }
+  ],
+  "tableTitle": "Bring the whole folder.",
+  "tableIntro": "Document metadata is extracted natively in Rust. Media probing, thumbnails, and playback use dedicated local tools.",
+  "columns": [
+    "Files",
+    "What you can inspect",
+    "Requirements"
+  ],
+  "rows": [
+    [
+      "Video & audio",
+      "Duration, codecs, bitrate, resolution",
+      "ffprobe / ffmpeg"
+    ],
+    [
+      "Images",
+      "Dimensions, camera and EXIF metadata",
+      "ffprobe / ffmpeg"
+    ],
+    [
+      "Documents",
+      "Pages, author, sheets and format details",
+      "No external probe tools"
+    ],
+    [
+      "Playback",
+      "Play video and audio locally",
+      "mpv"
+    ]
+  ],
+  "installIntro": "Homebrew is the simplest option on macOS. The formula includes ffmpeg and mpv.",
+  "installSteps": [
+    {
+      "title": "Install with Homebrew",
+      "body": "Installs the mls binary and media tools. Add trash separately if you want safe deletion in triage mode.",
+      "code": "brew install thepushkarp/tap/mls"
+    },
+    {
+      "title": "Open a folder",
+      "body": "The interactive TUI appears when output is a terminal. Use arrow keys or hjkl to navigate; press ? for help.",
+      "code": "mls ~/Videos"
+    },
+    {
+      "title": "Or install with Cargo",
+      "body": "The crate is named media-ls; the command is mls. Install ffmpeg and mpv separately for media probing and playback.",
+      "code": "cargo install media-ls"
+    }
+  ],
+  "installLinks": [
+    {
+      "label": "Get Homebrew",
+      "url": "https://brew.sh/"
+    },
+    {
+      "label": "Crates.io package",
+      "url": "https://crates.io/crates/media-ls"
+    }
+  ],
+  "faqs": [
+    {
+      "q": "Does MLS upload my files?",
+      "a": "No. Browsing and metadata extraction run locally. You choose what to do with the structured output."
+    },
+    {
+      "q": "What is the difference between JSON and NDJSON?",
+      "a": "--json returns one document containing entries, summary, and errors. --ndjson streams records as files are probed. Piping output selects NDJSON automatically; use --json explicitly when your consumer expects one document."
+    },
+    {
+      "q": "Which document types work?",
+      "a": "PDF, DOCX, XLSX, PPTX, ODF, legacy Office formats, CSV, TSV, TXT, and Markdown are supported. Available fields vary by format."
+    },
+    {
+      "q": "Can I play or clean up files?",
+      "a": "Use mls play for playback through mpv. mls triage provides an interactive keep/delete workflow. Install trash to move deleted files to Trash; triage can change your files."
+    },
+    {
+      "q": "What does an agent need?",
+      "a": "Use explicit --json or --ndjson output, inspect errors and exit codes, and keep playback or triage separate from read-only inspection. The agent guide includes examples and the JSON reference."
+    }
+  ],
+  "docs": [
+    {
+      "label": "CLI & JSON reference",
+      "url": "https://github.com/thepushkarp/mls#usage"
+    },
+    {
+      "label": "Supported formats",
+      "url": "https://github.com/thepushkarp/mls#supported-formats"
+    }
+  ],
+  "agentIntro": "Call mls locally with an explicit output mode. The website provides instructions; it cannot inspect a visitor’s files.",
+  "slug": "mls",
+  "url": "https://mls.thepushkarp.com",
+  "screenshots": [
+    {
+      "src": "/screenshots/browse.png",
+      "label": "File browser",
+      "alt": "Actual MLS terminal browsing generated sample clips from Blender Studio posters, with folders, files, thumbnail, codec metadata, and keyboard shortcuts.",
+      "width": 1480,
+      "height": 840,
+      "darkSrc": "/screenshots/browse.png"
+    }
+  ],
+  "artwork": [
+    {
+      "title": "Spring — Pillar poster",
+      "creator": "Blender Studio",
+      "url": "https://studio.blender.org/projects/spring/",
+      "source": "https://studio.blender.org/projects/api/assets/909/?site_context=featured_artwork",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "file": "/artwork/spring.jpg"
+    },
+    {
+      "title": "Charge — official movie poster",
+      "creator": "Blender Studio",
+      "url": "https://studio.blender.org/projects/charge/",
+      "source": "https://studio.blender.org/projects/api/assets/6234/?site_context=featured_artwork",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "file": "/artwork/charge.jpg"
+    },
+    {
+      "title": "Sprite Fright — simple poster",
+      "creator": "Blender Studio",
+      "url": "https://studio.blender.org/projects/sprite-fright/",
+      "source": "https://studio.blender.org/projects/api/assets/5448/?site_context=featured_artwork",
+      "license": "CC BY 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "file": "/artwork/sprite-fright.jpg"
+    }
+  ],
+  "interactiveDemo": "The preview recreates the MLS terminal in a Mac terminal window. Navigate folders with arrows or h/j/k/l and Enter; use / to filter, s/S to sort, 1–5 for kind filters, Space to mark, i for metadata, and p/P and [/] for mock playback. q exits to a sample prompt; running mls opens the browser again. Music includes WAV and FLAC metadata from real MLS output. File selection updates the JSON example. No local files are inspected or modified."
+}
