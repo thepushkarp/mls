@@ -25,6 +25,19 @@ for (const shot of data.screenshots) {
   await access(new URL(`../dist${shot.src}`, import.meta.url));
   assert(markdown.includes(shot.alt), `Screenshot description missing: ${shot.label}`);
 }
+const mobilePicture = html.match(/<picture[^>]*data-mobile-preview[^>]*>([\s\S]*?)<\/picture>/)?.[1];
+assert(mobilePicture, 'Mobile product screenshot missing');
+const mobileImage = mobilePicture.match(/<img[^>]+>/)?.[0] ?? '';
+assert(/alt="[^"]+"/.test(mobileImage), 'Mobile screenshot description missing');
+for (const theme of ['light', 'dark']) {
+  const path = `screenshots/demo-desktop-${theme}.png`;
+  assert(mobilePicture.includes(path), `${theme} mobile screenshot missing`);
+  const image = await readFile(new URL(`../dist/${path}`, import.meta.url));
+  assert.equal(image.subarray(1, 4).toString(), 'PNG', `${path} must be a PNG`);
+  assert.equal(image.readUInt32BE(16), Number(mobileImage.match(/width="(\d+)"/)?.[1]), `${path} width mismatch`);
+  assert.equal(image.readUInt32BE(20), Number(mobileImage.match(/height="(\d+)"/)?.[1]), `${path} height mismatch`);
+}
+
 const social = await readFile(new URL('../dist/social.png', import.meta.url));
 assert.equal(social.subarray(1, 4).toString(), 'PNG', 'Social image must be a PNG');
 assert.equal(social.readUInt32BE(16), 1200, 'Social image width must match OG metadata');

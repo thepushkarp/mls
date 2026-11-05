@@ -1,7 +1,9 @@
 ---
 import samples from '../../public/samples.json';
+import MobilePreview from './MobilePreview.astro';
 ---
-<div class="terminal-demo" id="terminal-demo" tabindex="0" role="region" aria-label="Interactive MLS file browser" aria-describedby="terminal-hint">
+<MobilePreview alt="MLS in a Mac terminal, with folders on the left, movie files in the center, and artwork and metadata on the right." width={1140} height={611} />
+<div class="terminal-demo desktop-demo" id="terminal-demo" tabindex="0" role="region" aria-label="Interactive MLS file browser" aria-describedby="terminal-hint">
   <noscript><p>Enable JavaScript to browse the sample, or <a href="/screenshots/browse.png">view the native terminal capture</a>.</p></noscript>
   <div class="demo-toolbar"><span class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></span><span id="terminal-path">mls — ~/Media/Movies</span><button type="button" id="reset-terminal">Reset</button></div>
   <div id="terminal-app">
@@ -21,6 +23,7 @@ import samples from '../../public/samples.json';
 </div>
 <script>
   import samples from '../../public/samples.json';
+  function initDemo() {
   const root=document.querySelector<HTMLElement>('#terminal-demo')!;
   const input=document.querySelector<HTMLInputElement>('#terminal-filter')!;
   const list=document.querySelector<HTMLElement>('#terminal-files')!;
@@ -149,6 +152,14 @@ import samples from '../../public/samples.json';
   });
   document.querySelector('#reset-terminal')!.addEventListener('click',()=>{folder='video';selected='file:0';kind='all';sort='name';reverse=false;marked.clear();input.value='';filterRow.hidden=true;metadata.hidden=false;playing=false;playback=null;renderPlayback();shell.hidden=true;app.hidden=false;document.querySelector<HTMLElement>('#terminal-help-text')!.hidden=true;help.setAttribute('aria-expanded','false');render();});
   render();
+  }
+  const mobile=matchMedia('(max-width:900px), (hover:none) and (pointer:coarse)');
+  function startDesktopDemo() {
+    if(mobile.matches)return;
+    initDemo();mobile.removeEventListener('change',startDesktopDemo);
+  }
+  mobile.addEventListener('change',startDesktopDemo);
+  startDesktopDemo();
 </script>
 <style>
   .terminal-demo { position:relative;overflow:hidden;border-radius:11px;background:#101419;color:#d4dbe1;border:1px solid #506167;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 20px 65px #0003; }
@@ -189,6 +200,4 @@ import samples from '../../public/samples.json';
   #terminal-playback { display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:8px 12px;border-top:1px solid #506167;font-size:12px;color:#8ddbcc; }#playback-title { flex:1;overflow-wrap:anywhere; }
   #terminal-shell { display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-height:300px;align-content:flex-start;padding:20px;font-size:13px; }#terminal-shell input { flex:1;min-width:120px;border:0;background:transparent;padding:0; }#shell-message { width:100%;color:#e6c276; }
   [hidden] { display:none!important; }
-  @media(max-width:680px) { .terminal-columns { grid-template-columns:43% 57%;padding:0 8px 8px; } .directory-pane { grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;border-bottom:0; } .directory-pane .pane-title { margin:0; } .directory-pane button { width:auto;font-size:12px; } .terminal-demo :global(.file-row) { font-size:12px;gap:5px; } .preview-pane img { height:160px; } dl { display:block;font-size:12px; } .preview-pane :global(dd) { margin-bottom:8px; } .terminal-controls { padding:8px; } }
-  @media(max-width:680px) { button,.terminal-demo :global(.file-row) { min-height:44px; }.terminal-keys { gap:4px; }.terminal-keys button { min-width:44px;font-size:12px; }.directory-pane { gap:4px 12px; }input { font-size:16px;min-height:44px; } }
 </style>

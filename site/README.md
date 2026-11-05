@@ -54,8 +54,14 @@ One icon button cycles System (default) → Light → Dark → System. Its icon 
 
 The product layouts are independent. Shared utilities cover metadata, theme selection, copy controls and attribution. Keep user-facing product copy and the Markdown content in `src/content.json` consistent when changing the page.
 
+## Mobile preview
+
+Screens up to 900px wide and touch devices without hover show a static desktop capture. The image keeps its original proportions and follows System, Light, or Dark appearance. Interactive demo initialization is deferred until a larger, hover-capable viewport is available.
+
+`src/components/MobilePreview.astro` selects `public/screenshots/demo-desktop-light.png` or `demo-desktop-dark.png`. Capture the complete desktop demo with staged data after artwork loads, and keep both images at the same dimensions. The image dimensions in `Demo.astro` must match the PNGs; `verify` checks this contract.
+
 ## Interactive preview
 
 The preview recreates the MLS terminal in a Mac terminal window. Navigate folders with arrows or h/j/k/l and Enter; use / to filter, s/S to sort, 1–5 for kind filters, Space to mark, i for metadata, and p/P and [/] for mock playback. q exits to a sample prompt; running mls opens the browser again. Music includes WAV and FLAC metadata from real MLS output. File selection updates the JSON example. No local files are inspected or modified.
 
-The browser demo is implemented in `src/components/Demo.astro`. `public/samples.json` is its metadata source; its layout follows the three-pane Rust TUI with responsive adjustments for mobile. The captured native terminal remains linked from the Markdown guide.
+The browser demo is implemented in `src/components/Demo.astro`. `public/samples.json` is its metadata source; its desktop layout follows the three-pane Rust TUI. The captured native terminal remains linked from the Markdown guide.
