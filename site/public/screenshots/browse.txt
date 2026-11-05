@@ -1,0 +1,32 @@
+┌Media─────────────────┐┌ Movies — 7 items ──────────────────────────────────┐┌ Preview ───────────────────────────────┐
+│Movies/               ││  V Charge.mp4                       360p    0:12   ││          ▀▄▄▄▄▄▄▄▄▄▄▄                  │
+│Music/                ││  D Film notes.md                                   ││          ▄▄▄▄▄▄▄▄▄▄▄▄▄                 │
+│Photos/               ││  I Poster - Charge.jpg             1080p           ││         ▀▀▀▀▀▄▀▀▄▀▄▄▄▄                 │
+│                      ││  I Poster - Spring.jpg             1080p           ││         ▄▄▄▀▄▄▀▀▄▄▄▀▀                  │
+│                      ││  I Poster - Sprite Fright.jpg      1080p           ││         ▄▄▀▀▄▄▀▀▀▄▄▄▄▄                 │
+│                      ││  V Spring.mp4                       360p    0:12   ││         ▄▄▄▄▀▀▀▀▀▀▄▄▄▄                 │
+│                      ││  V Sprite Fright.mp4                360p    0:12   ││         ▀▀▀▄▄▄▄▀▀▀▀▀▀▀                 │
+│                      ││                                                    ││         ▀▀▀▀▀▀▀▀▀▀▀▄▀▄                 │
+│                      ││                                                    ││          ▀▀▀▀▀▀▀▀▀▀▀▀                  │
+│                      ││                                                    ││                                        │
+│                      ││                                                    ││                                        │
+│                      ││                                                    ││File: Charge.mp4                        │
+│                      ││                                                    ││Kind: video                             │
+│                      ││                                                    ││                                        │
+│                      ││                                                    ││── Video ──                             │
+│                      ││                                                    ││Resolution: 640×360                     │
+│                      ││                                                    ││Codec: h264 (High)                      │
+│                      ││                                                    ││FPS: 25                                 │
+│                      ││                                                    ││Bitrate: 38 kbps                        │
+│                      ││                                                    ││                                        │
+│                      ││                                                    ││Duration: 0:12                          │
+│                      ││                                                    ││Size: 59 KB                             │
+│                      ││                                                    ││Overall: 41 kbps                        │
+│                      ││                                                    ││                                        │
+│                      ││                                                    ││── Tags ──                              │
+│                      ││                                                    ││Title: Charge                           │
+│                      ││                                                    ││                                        │
+└──────────────────────┘└────────────────────────────────────────────────────┘└────────────────────────────────────────┘
+H264 High │ 640×360 │ 25fps │ 41 kbps
+1/7 files │ Sort: name │ V[✓] A[✓] I[✓] D[✓]
+[j/k] nav  [Enter] open  [p] play  [/] filter  [1] all  [2-5] kind  [s] sort  [t] triage  [?] help

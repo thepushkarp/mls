@@ -1,0 +1,53 @@
+---
+import data from '../content.json';
+const isPreview = import.meta.env.VERCEL_ENV === 'preview';
+const schema = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: data.name,
+  description: data.description,
+  url: data.url + '/',
+  applicationCategory: 'MultimediaApplication',
+  operatingSystem: data.operatingSystem,
+  author: { '@type': 'Person', name: 'Pushkar Patel', url: 'https://www.thepushkarp.com/' },
+  image: data.url + '/social.png',
+  screenshot: data.screenshots.map(shot => data.url + shot.src),
+  license: 'https://opensource.org/license/mit',
+  downloadUrl: data.repo,
+  sameAs: data.repo,
+  isAccessibleForFree: true,
+};
+---
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{data.seoTitle}</title>
+<meta name="robots" content={isPreview ? 'noindex, follow' : 'index, follow, max-image-preview:large'} />
+<meta name="description" content={data.description} />
+<link rel="canonical" href={data.url + '/'} />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="alternate" type="text/markdown" href="/index.md" title="Read as Markdown" />
+<link rel="describedby" href="/llms.txt" type="text/markdown" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content={data.seoTitle} />
+<meta property="og:site_name" content={data.name} />
+<meta property="og:description" content={data.description} />
+<meta property="og:url" content={data.url + '/'} />
+<meta property="og:image" content={data.url + '/social.png'} />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:alt" content={data.socialImageAlt} />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={data.seoTitle} />
+<meta name="twitter:description" content={data.description} />
+<meta name="twitter:image" content={data.url + '/social.png'} />
+<meta name="twitter:image:alt" content={data.socialImageAlt} />
+<script is:inline>
+  // Set the explicit choice before paint. With no saved choice, CSS follows
+  // the system directly, including OS changes and browsing without JavaScript.
+  try {
+    const saved = localStorage.getItem('landing.appearance');
+    if (saved === 'light' || saved === 'dark') document.documentElement.dataset.theme = saved;
+  } catch { /* Storage can be disabled; system appearance still works. */ }
+</script>
+<script is:inline type="application/ld+json" set:html={JSON.stringify(schema).replace(/</g,'\u003c')} />

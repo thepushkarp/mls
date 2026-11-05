@@ -5,3 +5,6 @@
 .claude/
 docs/plans/
 homebrew-tap/
+
+# Keep landing source trackable when global MkDocs rules ignore /site.
+!/site/

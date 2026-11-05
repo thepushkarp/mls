@@ -10,6 +10,7 @@ authors = ["Pushkar Patel"]
 keywords = ["media", "metadata", "tui", "file-browser", "video"]
 categories = ["command-line-utilities", "multimedia"]
 readme = "README.md"
+exclude = ["site/**"]
 
 [[bin]]
 name = "mls"

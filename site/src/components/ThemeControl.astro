@@ -1,0 +1,39 @@
+<button class="theme-control" type="button" data-appearance="system" aria-label="Theme: System. Switch to Light." title="Theme: System. Switch to Light." hidden>
+  <svg data-icon="system" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
+  <svg data-icon="light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></svg>
+  <svg data-icon="dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A9 9 0 0 1 9.5 3.5a9 9 0 1 0 11 11Z" /></svg>
+</button>
+<script>
+  const button=document.querySelector<HTMLButtonElement>('.theme-control')!;
+  const modes=['system','light','dark'] as const;
+  const labels={system:'System',light:'Light',dark:'Dark'};
+  let current:typeof modes[number]='system';
+  function apply(value:string) {
+    current=value==='light'||value==='dark'?value:'system';
+    if(current==='system')delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme=current;
+    button.dataset.appearance=current;
+    const next=modes[(modes.indexOf(current)+1)%modes.length];
+    const label=`Theme: ${labels[current]}. Switch to ${labels[next]}.`;
+    button.setAttribute('aria-label',label);
+    button.title=label;
+    window.dispatchEvent(new Event('appearancechange'));
+  }
+  apply(document.documentElement.dataset.theme||'system');
+  button.hidden=false;
+  button.addEventListener('click',()=>{
+    apply(modes[(modes.indexOf(current)+1)%modes.length]);
+    try {
+      if(current==='system')localStorage.removeItem('landing.appearance');
+      else localStorage.setItem('landing.appearance',current);
+    } catch { /* The theme remains usable when browser storage is unavailable. */ }
+  });
+  window.addEventListener('storage',event=>{if(event.key==='landing.appearance'||event.key===null)apply(event.newValue||'system');});
+</script>
+<style>
+  .theme-control { display:inline-grid;place-items:center;flex:none;width:40px;height:40px;margin:0;padding:0;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--accent);cursor:pointer; }
+  .theme-control:hover { background:var(--soft); }
+  .theme-control:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
+  svg { display:none;width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;pointer-events:none; }
+  [data-appearance=system] [data-icon=system], [data-appearance=light] [data-icon=light], [data-appearance=dark] [data-icon=dark] { display:block; }
+</style>

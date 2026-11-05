@@ -1,0 +1,33 @@
+---
+import data from '../content.json';
+import samples from '../../public/samples.json';
+import PageHead from '../components/PageHead.astro';
+import ThemeControl from '../components/ThemeControl.astro';
+import Demo from '../components/Demo.astro';
+import Code from '../components/Code.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/site.css';
+const first = samples[0];
+---
+<!doctype html><html lang="en"><head><PageHead /></head><body class="mls">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header shell"><a class="wordmark" href="/"><img src="/favicon.svg" width="30" height="30" alt="" />mls<span class="version-label">Media LS</span></a><nav aria-label="Main navigation"><a href="#browse">Browse</a><a href="#json">JSON</a><a href="#install">Install</a><a href={data.repo}>Source</a></nav><ThemeControl /></header>
+<main id="main" class="shell">
+<section class="command-intro" aria-labelledby="hero-title"><h1 id="hero-title"><code>ls</code> for what’s<br />inside your media files.</h1><p class="lead">Browse videos, audio, images, and documents in your terminal. Inspect their metadata or export it as JSON. Everything runs locally.</p><div class="quick-install" id="install"><Code code="brew install thepushkarp/tap/mls
+mls ." /><div><p>Install on macOS, then browse the current folder.</p><a href="https://brew.sh/">Get Homebrew</a> · <a href="#other-install">Cargo installation</a></div></div></section>
+<section class="workspace-section" id="browse" aria-labelledby="browse-title"><div class="section-bar"><h2 id="browse-title">Browse the folder</h2><code>mls ~/Media</code></div><figure class="demo-figure" id="demo"><Demo /></figure></section>
+<section class="output-section section" id="json" aria-labelledby="json-title"><div class="output-copy"><h2 id="json-title">Metadata for<br />your scripts.</h2><p>Use <code>--json</code> for one document, or pipe the output for streaming NDJSON.</p><Code code="mls --json ~/Media" /><p class="sample-note">Sample output excerpt; paths and response wrapper omitted.</p><a href="/agents.md">Agent guide</a></div><div class="json-inspector"><label for="sample-file">Inspect a sample file</label><select id="sample-file">{samples.map((sample,index) => <option value={index}>{sample.file_name}</option>)}</select><pre role="region" tabindex="0" aria-label="JSON output excerpt"><code id="sample-output">{JSON.stringify(first,null,2)}</code></pre><a href="/samples.json">Read the sample JSON</a></div></section>
+<details class="install-alternative" id="other-install"><summary>Install with Cargo</summary><p>The crate is <code>media-ls</code>; the command is <code>mls</code>. Install ffmpeg for media probing and mpv for playback.</p><Code code="cargo install media-ls" /></details>
+</main><Footer />
+<script>
+ import samples from '../../public/samples.json';
+ window.addEventListener('demo-filechange',event => {
+   const index=(event as CustomEvent<{index:number}>).detail.index;
+   document.querySelector<HTMLSelectElement>('#sample-file')!.value=String(index);
+   document.querySelector('#sample-output')!.textContent=JSON.stringify(samples[index],null,2);
+ });
+ document.querySelector<HTMLSelectElement>('#sample-file')!.addEventListener('change',event => {
+   const index=Number((event.target as HTMLSelectElement).value);
+   document.querySelector('#sample-output')!.textContent=JSON.stringify(samples[index],null,2);
+ });
+</script></body></html>
