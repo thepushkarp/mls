@@ -78,7 +78,8 @@ jobs:
       - name: Deploy verified output
         id: deploy
         run: |
-          vercel deploy --prebuilt --prod --yes --json --token "$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment.json"
+          # Non-interactive mode gives CI and agent sessions the same JSON envelope.
+          vercel deploy --prebuilt --prod --yes --json --non-interactive --token "$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment.json"
           DEPLOYMENT_URL=$(jq -er '.deployment | select(.readyState == "READY") | .url' "$RUNNER_TEMP/site-deployment.json")
           echo "url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
           echo "Site deployed to $DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
