@@ -310,20 +310,23 @@ fn parse_odf_meta(xml: &str) -> OdfMeta {
     let mut reader = quick_xml::Reader::from_str(xml);
     let mut buf = Vec::new();
     let mut current_tag = String::new();
+    let mut text = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(quick_xml::events::Event::Start(ref e) | quick_xml::events::Event::Empty(ref e)) => {
+                if let Some(val) = take_text(&mut text) {
+                    set_odf_field(&mut meta, &current_tag, val);
+                }
                 let local = local_name(e.name().as_ref());
 
                 // ODF stores statistics as attributes on `meta:document-statistic`
                 if local == "document-statistic" {
                     for attr in e.attributes().flatten() {
                         let key = local_name(attr.key.as_ref());
-                        let val = String::from_utf8_lossy(&attr.value).to_string();
                         match key.as_str() {
-                            "page-count" => meta.page_count = val.parse().ok(),
-                            "word-count" => meta.word_count = val.parse().ok(),
+                            "page-count" => meta.page_count = attr.value.parse().ok(),
+                            "word-count" => meta.word_count = attr.value.parse().ok(),
                             _ => {}
                         }
                     }
@@ -331,21 +334,12 @@ fn parse_odf_meta(xml: &str) -> OdfMeta {
 
                 current_tag = local;
             }
-            Ok(quick_xml::events::Event::Text(ref e)) => {
-                let text = e.unescape().ok().map(|s| s.trim().to_owned());
-                if let Some(val) = text.filter(|s| !s.is_empty()) {
-                    match current_tag.as_str() {
-                        "initial-creator" | "creator" => meta.author = Some(val),
-                        "title" => meta.title = Some(val),
-                        "subject" => meta.subject = Some(val),
-                        "generator" => meta.generator = Some(val),
-                        "creation-date" => meta.creation_date = Some(val),
-                        "date" => meta.modification_date = Some(val),
-                        _ => {}
-                    }
-                }
-            }
+            Ok(quick_xml::events::Event::Text(ref e)) => text.push_str(&e.xml10_content()),
+            Ok(quick_xml::events::Event::GeneralRef(ref e)) => push_reference(&mut text, e),
             Ok(quick_xml::events::Event::End(_)) => {
+                if let Some(val) = take_text(&mut text) {
+                    set_odf_field(&mut meta, &current_tag, val);
+                }
                 current_tag.clear();
             }
             Ok(quick_xml::events::Event::Eof) | Err(_) => break,
@@ -355,6 +349,18 @@ fn parse_odf_meta(xml: &str) -> OdfMeta {
     }
 
     meta
+}
+
+fn set_odf_field(meta: &mut OdfMeta, tag: &str, val: String) {
+    match tag {
+        "initial-creator" | "creator" => meta.author = Some(val),
+        "title" => meta.title = Some(val),
+        "subject" => meta.subject = Some(val),
+        "generator" => meta.generator = Some(val),
+        "creation-date" => meta.creation_date = Some(val),
+        "date" => meta.modification_date = Some(val),
+        _ => {}
+    }
 }
 
 // ─── OLE2 (legacy DOC/XLS/PPT) ─────────────────────────────────────────
@@ -539,23 +545,24 @@ fn parse_xml_text_fields(xml: &str, mut on_field: impl FnMut(&str, String)) {
     let mut reader = quick_xml::Reader::from_str(xml);
     let mut buf = Vec::new();
     let mut current_tag = String::new();
+    let mut text = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e) | Event::Empty(ref e)) => {
-                current_tag = local_name(e.name().as_ref());
-            }
-            Ok(Event::Text(ref e)) => {
-                if let Some(val) = e
-                    .unescape()
-                    .ok()
-                    .map(|s| s.trim().to_owned())
-                    .filter(|s| !s.is_empty())
-                {
+                if let Some(val) = take_text(&mut text) {
                     on_field(&current_tag, val);
                 }
+                current_tag = local_name(e.name().as_ref());
             }
-            Ok(Event::End(_)) => current_tag.clear(),
+            Ok(Event::Text(ref e)) => text.push_str(&e.xml10_content()),
+            Ok(Event::GeneralRef(ref e)) => push_reference(&mut text, e),
+            Ok(Event::End(_)) => {
+                if let Some(val) = take_text(&mut text) {
+                    on_field(&current_tag, val);
+                }
+                current_tag.clear();
+            }
             Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }
@@ -563,13 +570,34 @@ fn parse_xml_text_fields(xml: &str, mut on_field: impl FnMut(&str, String)) {
     }
 }
 
+/// Append the character a `&amp;` or `&#38;` style reference stands for.
+///
+/// `quick_xml` reports references as separate events between `Text` events, so an element's
+/// value is complete only at the next tag. Reading each `Text` event as a whole value would
+/// keep just the fragment after the last reference. Metadata is best-effort, so an invalid or
+/// non-predefined reference is left out rather than failing the file.
+fn push_reference(text: &mut String, reference: &quick_xml::events::BytesRef<'_>) {
+    if let Ok(Some(ch)) = reference.resolve_char_ref() {
+        text.push(ch);
+    } else if let Some(resolved) = quick_xml::escape::resolve_predefined_entity(reference) {
+        text.push_str(resolved);
+    }
+}
+
+/// Take the accumulated element text, trimmed, or `None` when it is only whitespace.
+fn take_text(text: &mut String) -> Option<String> {
+    let value = text.trim().to_owned();
+    text.clear();
+    (!value.is_empty()).then_some(value)
+}
+
 /// Extract the local part of a possibly namespaced XML name.
 ///
 /// Examples: `dc:creator` becomes `creator`, `meta:creation-date` becomes `creation-date`.
-fn local_name(name: &[u8]) -> String {
-    let full = String::from_utf8_lossy(name);
-    full.rsplit_once(':')
-        .map_or(full.to_string(), |(_, local)| local.to_string())
+fn local_name(name: &str) -> String {
+    name.rsplit_once(':')
+        .map_or(name, |(_, local)| local)
+        .to_string()
 }
 
 fn count_xml_elements(xml: &str, element_local_name: &str) -> u32 {
@@ -601,9 +629,37 @@ mod tests {
 
     #[test]
     fn local_name_strips_namespace() {
-        assert_eq!(local_name(b"dc:creator"), "creator");
-        assert_eq!(local_name(b"meta:creation-date"), "creation-date");
-        assert_eq!(local_name(b"title"), "title");
+        assert_eq!(local_name("dc:creator"), "creator");
+        assert_eq!(local_name("meta:creation-date"), "creation-date");
+        assert_eq!(local_name("title"), "title");
+    }
+
+    #[test]
+    fn text_fields_keep_values_split_by_references() {
+        let xml = "<cp:coreProperties>\n  <dc:title> Rock &amp; Roll &#38; Soul </dc:title>\n  \
+                   <dc:creator>A &lt;B&gt;</dc:creator>\n</cp:coreProperties>";
+        let mut fields = Vec::new();
+        parse_xml_text_fields(xml, |tag, val| fields.push((tag.to_owned(), val)));
+        assert_eq!(
+            fields,
+            [
+                ("title".to_owned(), "Rock & Roll & Soul".to_owned()),
+                ("creator".to_owned(), "A <B>".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn odf_meta_keeps_values_split_by_references() {
+        let meta = parse_odf_meta(
+            "<office:meta><dc:title>Q&amp;A</dc:title>\
+             <meta:document-statistic meta:page-count=\"3\" meta:word-count=\"9\"/>\
+             <dc:subject>Notes</dc:subject></office:meta>",
+        );
+        assert_eq!(meta.title.as_deref(), Some("Q&A"));
+        assert_eq!(meta.subject.as_deref(), Some("Notes"));
+        assert_eq!(meta.page_count, Some(3));
+        assert_eq!(meta.word_count, Some(9));
     }
 
     #[test]

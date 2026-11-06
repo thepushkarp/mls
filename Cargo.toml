@@ -21,7 +21,7 @@ anyhow = "1.0.102"
 chrono = { version = "0.4.44", features = ["serde"] }
 clap = { version = "4.5.60", features = ["derive"] }
 crossterm = { version = "0.29.0", features = ["event-stream"] }
-lru = "0.16.3"
+lru = "0.19.0"
 ratatui = "0.30.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -31,12 +31,12 @@ image = { version = "0.25.9", default-features = false, features = [
     "jpeg", "png", "webp", "gif", "bmp", "tiff",
 ] }
 kamadak-exif = "0.6.1"
-ratatui-image = { version = "10.0.6", default-features = false, features = ["crossterm"] }
+ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
 tokio = { version = "1.49.0", features = ["full"] }
-lopdf = { version = "0.39.0", default-features = false }
-zip = { version = "8.2.0", default-features = false, features = ["deflate"] }
-quick-xml = "0.37.5"
-cfb = "0.10.0"
+lopdf = { version = "0.47.0", default-features = false }
+zip = { version = "9.4.1", default-features = false, features = ["deflate"] }
+quick-xml = "0.42.0"
+cfb = "0.16.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
