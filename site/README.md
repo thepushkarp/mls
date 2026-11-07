@@ -22,7 +22,9 @@ The dedicated Vercel project is `mls` in `pushkar-patels-projects`. GitHub Actio
 
 GitHub repository variables `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` identify the destination. The `VERCEL_TOKEN` repository secret is a dedicated project-scoped token. Rotate it in Vercel and replace the GitHub secret when needed; never commit credentials or the generated `.env.local` and `.vercel/` files. The public site itself requires no runtime environment variables or backend.
 
-`vercel.json` supplies build settings and response headers. Add the production hostname from `astro.config.mjs` and `src/content.json` under Vercel Domains, then add the exact CNAME Vercel supplies at the current DNS provider.
+The repository-root `vercel.json` disables automatic Git deployments, including PR previews. This guard prevents duplicate Git builds if the repository connection is re-enabled. GitHub Actions still verifies pull requests and deploys production output through the Vercel CLI.
+
+`site/vercel.json` supplies build settings and response headers. Add the production hostname from `astro.config.mjs` and `src/content.json` under Vercel Domains, then add the exact CNAME Vercel supplies at the current DNS provider.
 
 ## Content and discovery
 
